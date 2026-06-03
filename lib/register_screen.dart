@@ -3,7 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
-import 'package:untitled/main.dart'; // Ensure HomeScreen is defined inside here!
+import 'package:untitled/main.dart';
+import 'package:untitled/session_manager.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -48,7 +49,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  // FIXED: Removed the dangling duplicate statements and aligned the structural brackets
   void _submitRegistration() async {
     if (_formKey.currentState!.validate()) {
       final name = _nameController.text.trim();
@@ -63,29 +63,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
       );
 
-      final url = Uri.parse('http://10.110.36.23:8080/api/users/register');
+      final url = Uri.parse('http://10.34.113.23:8080/api/users/register');
 
       try {
         final response = await http.post(
           url,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
-            'fullName': name,         // FIXED: camelCase matches Spring Boot DTO
-            'email': email,           // FIXED: Added missing email field back
+            'fullName': name,
+            'email': email,
             'password': password,
             'fellowshipGroup': group,
             'residentialCell': cellgroup,
           }),
-        );
+        ).timeout(const Duration(seconds: 10));
+        print('📡 Server Response Received! Status Code: ${response.statusCode}');
+        print('📡 RAW PAYLOAD FROM BACKEND: ${response.body}');
 
         if (!mounted) return;
-        Navigator.pop(context); // Dismiss loading dialog
 
-        if (response.statusCode == 200) {
+        // 🛡️ Safe context dismissal of loading dialog
+        Navigator.of(context, rootNavigator: true).pop();
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          // 🎯 DECODE THE GENERATED IDENTITY FROM POSTGRESQL
+          final Map<String, dynamic> responseData = jsonDecode(response.body);
+          final dynamic rawId = responseData['id'];
+          if (rawId == null) {
+            throw Exception("The server saved the user but forgot to send back the 'id' key!");
+          }
+          final int registeredId = int.parse(responseData['id'].toString());
+          print('🔑 SUCCESS: Lock SessionManager to unique User ID: $registeredId');
+
+          SessionManager.currentUserId = registeredId;
+
+          // 🎯 SECURE DATA ISOLATION: Lock session to this new ID instantly!
+          SessionManager.currentUserId = registeredId;
+
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('isLoggedIn', true);
+          await prefs.setInt('userId', registeredId);
           await prefs.setString('userName', name);
-          await prefs.setString('userEmail', _emailController.text.trim());
+          await prefs.setString('userEmail', email);
+
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Account successfully created!'),
@@ -93,11 +113,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           );
 
+          // Navigate cleanly to the dashboard dashboard
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const HomeScreen()),
+              //  (route) => false,
           );
+
         } else {
+          // Handle registration rejections cleanly
           final responseData = jsonDecode(response.body);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -107,8 +131,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
           );
         }
       } catch (e) {
+        print('Fatal network intercept error: $e');
         if (!mounted) return;
-        Navigator.pop(context); // Dismiss loading dialog
+
+        // Clean up navigation safely if a connection drops out mid-process
+        try {
+          Navigator.pop(context);
+        } catch (_) {}
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

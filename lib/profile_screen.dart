@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/welcome_screen.dart'; // Ensure this matches your file name
+import 'package:untitled/more_options_drawer.dart';
 
-class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key});
 
   @override
-  State<ProfilePage> createState() => _ProfilePageState();
+  State<ProfileScreen> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _ProfilePageState extends State<ProfileScreen> {
   String _userName = 'Loading...';
   String _userEmail = '';
 
@@ -23,7 +24,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _userName = prefs.getString('userName') ?? 'Cathedral Member';
-      _userEmail = prefs.getString('userEmail', ) ?? 'james@cathedral.org';
+      _userEmail = prefs.getString('userEmail') ?? 'james@cathedral.org';
     });
   }
 
@@ -55,14 +56,34 @@ class _ProfilePageState extends State<ProfilePage> {
             // YES BUTTON -> Clears state and logs out completely
             ElevatedButton(
               onPressed: () async {
-                Navigator.of(dialogContext).pop(); // Close dialog sheet
+                Navigator.of(dialogContext).pop(); // Close confirmation dialog sheet
 
+                // 1. Immediately pop up the un-dismissible loading overlay dialog
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (BuildContext loadingContext) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF0D47A1), // Cathedral Royal Blue
+                      ),
+                    );
+                  },
+                );
+
+                // 2. Perform your local disk storage wipe
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('isLoggedIn', false); // Wipe storage flag
 
+                // 3. Pause the execution for exactly 2 seconds to let the indicator spin
+                await Future.delayed(const Duration(seconds: 2));
+
                 if (!context.mounted) return;
 
-                // Clear background stack and route back to Welcome Screen gateway
+                // 4. Pop the loading spinner dialog off the stack
+                Navigator.of(context).pop();
+
+                // 5. Clear background stack and route back to Welcome Screen gateway
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (context) => const WelcomeScreen()),
@@ -83,105 +104,121 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header Layout: User details (Left) vs Menu & Avatar (Right Column)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 12), // Balances text with top menu icon line
-                    Text(
-                      _userName,
-                      style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _userEmail,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  // 🚀 THE SKETCH MENU BUTTON (Hamburger Menu)
-                  IconButton(
-                    icon: const Icon(Icons.menu, color: Colors.black87, size: 28),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () {
-                      // Action for menu button tap later
-                    },
+    // 🎯 FIXED: Wrapped inside transparency Material so your InkWells can safely render without errors
+    return Material(
+      type: MaterialType.transparency,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            
+            // Header Layout: User details (Left) vs Menu & Avatar (Right Column)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12), // Balances text with top menu icon line
+                      Text(
+                        _userName,
+                        style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _userEmail,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Builder (
+                    builder: (buttonContext) {
 
-                  // Profile Initial Avatar Circle
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: const Color(0xFF0D47A1).withOpacity(0.1),
-                    child: CircleAvatar(
-                      radius: 32,
-                      backgroundColor: const Color(0xFF0D47A1),
-                      child: Text(
-                        _userName.isNotEmpty ? _userName[0].toUpperCase() : 'K',
-                        style: const TextStyle(fontSize: 28, color: Colors.white, fontWeight: FontWeight.bold),
+
+                    // 🚀 THE SKETCH MENU BUTTON (Hamburger Menu)
+                    return IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.black87, size: 28),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                           Scaffold.of(buttonContext).openEndDrawer();
+                        // Action for menu button tap later
+                      },
+                    );
+  },
+  ),
+
+
+                    const SizedBox(height: 12),
+
+                    // Profile Initial Avatar Circle
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: const Color(0xFF0D47A1).withOpacity(0.1),
+                      child: CircleAvatar(
+                        radius: 32,
+                        backgroundColor: const Color(0xFF0D47A1),
+                        child: Text(
+                          _userName.isNotEmpty ? _userName[0].toUpperCase() : 'K',
+                          style: const TextStyle(fontSize: 28, color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF0D47A1).withOpacity(0.3)),
+                  ],
+  )
+  ],
             ),
-            child: const Text('ACK St. James Cathedral', style: TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(height: 30),
-          Row(
-            children: [
-              _buildQuickActionCard(icon: Icons.bookmark_border_rounded, label: 'Saved', color: const Color(0xFF0D47A1), onTap: () {}),
-              const SizedBox(width: 16),
 
-              // 🚀 LOGOUT CARD WITH CONFIRMATION PROMPT
-              _buildQuickActionCard(
-                icon: Icons.logout_rounded,
-                label: 'Logout',
-                color: Colors.redAccent,
-                onTap: () {
-                  _showLogoutConfirmationDialog(context);
-                },
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF0D47A1).withOpacity(0.3)),
               ),
-            ],
-          ),
-          const SizedBox(height: 35),
-          const Text('Account Management', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.grey)),
-          const SizedBox(height: 10),
-          Expanded(
-            child: ListView(
+              child: const Text('ACK St. James Cathedral', style: TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: 30),
+            Row(
               children: [
-                _buildSettingsListTile(Icons.settings_outlined, 'Settings'),
-                _buildSettingsListTile(Icons.edit_outlined, 'Edit profile'),
-                _buildSettingsListTile(Icons.campaign_outlined, 'Main events'),
-                _buildSettingsListTile(Icons.info_outline_rounded, 'About us'),
+                _buildQuickActionCard(icon: Icons.bookmark_border_rounded, label: 'Saved', color: const Color(0xFF0D47A1), onTap: () {}),
+                const SizedBox(width: 16),
+
+                // 🚀 LOGOUT CARD WITH CONFIRMATION PROMPT
+                _buildQuickActionCard(
+                  icon: Icons.logout_rounded,
+                  label: 'Logout',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    _showLogoutConfirmationDialog(context);
+                  },
+                ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 35),
+            const Text('Account Management', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _buildSettingsListTile(Icons.settings_outlined, 'Settings'),
+                  _buildSettingsListTile(Icons.edit_outlined, 'Edit profile'),
+                  _buildSettingsListTile(Icons.campaign_outlined, 'Main events'),
+                  _buildSettingsListTile(Icons.info_outline_rounded, 'About us'),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

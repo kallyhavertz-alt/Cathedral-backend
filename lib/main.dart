@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:untitled/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/more_options_drawer.dart';
 import 'package:untitled/welcome_screen.dart';
 import 'package:untitled/profile_screen.dart';
 import 'package:untitled/event_details_screen.dart';
 import 'package:untitled/notes_screen.dart';
+import 'package:untitled/session_manager.dart';
 import 'package:untitled/cathedral_project_screen.dart';
 import 'package:untitled/live_events_screen.dart';
 
-// MODIFICATION AREA 1: Added networking utilities
+
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+
+import 'notification_hub.dart';
+import 'notification_service.dart';
 class SwitchToProfileTabNotification extends Notification {}
 
 void main() async {
@@ -21,66 +26,97 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  // 🎯 Make the background bars completely transparent
+
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     systemNavigationBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light, // Adjust to .light if your header is dark
+    statusBarIconBrightness: Brightness.light,
   ));
-  final prefs = await SharedPreferences.getInstance();
-  final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+  final SharedPreferences rootprefs = await SharedPreferences.getInstance();
+  await SessionManager.initializeEngine(rootprefs);
+  await NotificationHub.instance.initializeHubCache();
+  final bool isLoggedIn = rootprefs.getBool('isLoggedIn') ?? false;
+
+  print("🏁 THE FINAL HANDSHAKE: Auth -> $isLoggedIn | Active Identity Token -> ${SessionManager.currentUserId}");
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    print('📡 Foreground FCM Message Received!');
+    if (message.notification != null) {
+      NotificationHub.instance.receiveForegroundNotification(
+        message.notification!.title ?? 'ACK Cathedral Update',
+        message.notification!.body ?? 'Click to see what is happening today.',
+      );
+    }
+  });
+  await NotificationService().initialize();
 
   runApp(ACKstJamesCathedralApp(isLoggedIn: isLoggedIn));
 }
-void requestNotificationPermission() async {
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-  NotificationSettings settings = await messaging.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
-
-  if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-    print('🎯 Awesome! User allowed notification prompts!');
-  } else {
-    print('❌ User denied or skipped notification settings.');
-  }
-}
 
 class ACKstJamesCathedralApp extends StatelessWidget {
+
   final bool isLoggedIn;
   const ACKstJamesCathedralApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'St. James Cathedral App',
-      theme: ThemeData(
-        primaryColor: const Color(0xFF0D47A1),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.amberAccent,
-          elevation: 0,
-          iconTheme: IconThemeData(color: Colors.black),
-          titleTextStyle: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        useMaterial3: true,
-      ),
-      builder: (context, child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
-            child: SafeArea(
-              top: false,
-              bottom: false,
-              child: child!,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: SessionManager.themeNotifier,
+      builder: (context, currentMode, child) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'St. James Cathedral App',
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: Colors.white,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF0D47A1),
+              brightness: Brightness.light,
             ),
+
+            primaryColor: const Color(0xFF0D47A1),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.amberAccent,
+              elevation: 0,
+              iconTheme: IconThemeData(color: Colors.black),
+              titleTextStyle: TextStyle(color: Colors.black,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold),
+            ),
+
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF0D47A1),
+              brightness: Brightness.dark,
+            ),
+          ),
+          themeMode: currentMode,
+          home: isLoggedIn ? const HomeScreen() : const WelcomeScreen(),
+          builder: (context, extendChild) {
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.noScaling),
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                child: extendChild!,
+              ),
+            );
+          },
+
         );
       },
-      home: isLoggedIn ? const HomeScreen() : const WelcomeScreen(),
     );
-  } // end of Widget build
-} // end of ACKstJamesCathedralApp class
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -114,9 +150,9 @@ class _HomeScreenState extends State<HomeScreen> {
           child: NotificationListener<SwitchToProfileTabNotification>(
             onNotification: (notification) {
               setState(() {
-                _currentIndex = 4; // Moves explicitly to the ProfileScreen page index
+                _currentIndex = 4;
               });
-              return true; // Stops the notification right here
+              return true;
             },
             child: _bottomNavPages[_currentIndex],
           ),
@@ -139,11 +175,11 @@ class _HomeScreenState extends State<HomeScreen> {
             BottomNavigationBarItem(icon: Icon(Icons.edit_note), label: 'My Notes'),
             BottomNavigationBarItem(icon: Icon(Icons.person), label: 'You'),
           ],
-        ), // end of BottomNavigationBar
-      ), // end of Scaffold
-    ); // end of return PopScope
-  } // end of Widget build
-} // end of _HomeScreenState class
+        ),
+      ),
+    );
+  }
+}
 
 class EventsTabBarView extends StatefulWidget {
   const EventsTabBarView({super.key});
@@ -153,16 +189,89 @@ class EventsTabBarView extends StatefulWidget {
 }
 
 class _EventsTabBarViewState extends State<EventsTabBarView> {
-  // 🎯 Dynamic Name Token Holder (Defaults to Member if not found)
+
   String _currentUserName = "Member";
 
   @override
   void initState() {
     super.initState();
-    _loadActiveMemberName(); // 🔌 Fetch name from storage disk on initialization
+    _loadActiveMemberName();
   }
 
-  // 💾 Fetch the name securely from storage hardware memory
+  void _showNotificationHistorySheet(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Cathedral Notifications',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87
+                  ),
+                ),
+                const SizedBox(height: 15),
+                Expanded(
+                  child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+                    valueListenable: NotificationHub.instance.messagesList,
+                    builder: (context, messages, child) {
+                      if (messages.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            'No recent notifications received yet.',
+                            style: TextStyle(color: Colors.grey, fontSize: 13),
+                          ),
+                        );
+                      }
+                      return ListView.builder(
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = messages[index];
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                            leading: CircleAvatar(
+                              backgroundColor: isDark ? const Color(0xFF1A2638) : Colors.blue.shade50,
+                              child: const Icon(Icons.church_rounded, color: Colors.blueAccent),
+                            ),
+                            title: Text(
+                              msg['title'] ?? 'ACK Cathedral Update',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87
+                              ),
+                            ),
+                            subtitle: Text(
+                              msg['body'] ?? '',
+                              style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
   Future<void> _loadActiveMemberName() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -170,7 +279,7 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
 
       if (savedName != null && savedName.isNotEmpty) {
         setState(() {
-          // Splits full name down to just your first name
+
           _currentUserName = savedName.split(' ')[0];
         });
       }
@@ -185,15 +294,65 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          // 🎯 MODIFIED: Now dynamically greets the logged-in user!
+
           title: Text('Praise the Lord $_currentUserName!'),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.notifications_none, color: Colors.black),
-              onPressed: () {},
+
+
+            ValueListenableBuilder<int>(
+              valueListenable: NotificationHub.instance.unreadCount,
+              builder: (context, unreadCountValue, child) {
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                          unreadCountValue > 0
+                              ? Icons.notifications_active_rounded
+                              : Icons.notifications_none_rounded,
+                          color: unreadCountValue > 0 ? const Color(0xFFFF0000 ) : Colors.white
+                      ),
+                      onPressed: () {
+
+                        NotificationHub.instance.markAllAsRead();
+
+
+                        _showNotificationHistorySheet(context);
+                      },
+                    ),
+
+
+                    if (unreadCountValue > 0)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.redAccent,
+                            shape: BoxShape.circle,
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            '$unreadCountValue',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
 
-            // 🎯 CUSTOM ACCOUNT DIALOG BOX (Routes explicitly to ProfilePage)
+
             GestureDetector(
               onTapDown: (TapDownDetails details) async {
                 final RenderBox button = context.findRenderObject() as RenderBox;
@@ -241,12 +400,10 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
                             Divider(color: Colors.grey.shade200, thickness: 1),
                             const SizedBox(height: 4),
 
-                            // 🚀 CLICKABLE "MORE" CALL TO ACTION
                             GestureDetector(
                               onTap: () {
-                                Navigator.of(context).pop(); // Dismisses the popup card dropdown
+                                Navigator.of(context).pop();
 
-                                // 🎯 TARGET LINK FIX: Points explicitly to your clean ProfilePage class
                                 SwitchToProfileTabNotification().dispatch(context);
                               },
                               child: Container(
@@ -305,23 +462,22 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
               Tab(text: "Events"),
               Tab(text: "Other Activities"),
             ],
-          ), // end of TabBar
-        ), // end of AppBar
+          ),
+        ),
         body: const TabBarView(
           children: [
             EventsPage(),
             OtherActivitiesPage(),
           ],
-        ), // end of TabBarView
-      ), // end of Scaffold
-    ); // end of return DefaultTabController
-  } // end of Widget build
-} // end of EventsTabBarView class
+        ),
+      ),
+    );
+  }
+}
 
 
-// ====================================================================
-// MODIFICATION AREA: The New Live Events Stateful Controller WITH REFRESH
-// ====================================================================
+
+
 class EventsPage extends StatefulWidget {
   const EventsPage({super.key});
 
@@ -330,123 +486,229 @@ class EventsPage extends StatefulWidget {
 }
 
 class _EventsPageState extends State<EventsPage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  List<dynamic> _allServerEvents = [];
   List<dynamic> _serverEvents = [];
   bool _isLoading = true;
+  bool _isNewestFirst = true;
 
-  // Change this IP string to match your laptop's current network address configuration
-  final String _apiUrl = "http://10.34.113.23:8080/api/events/all";
+  final String _apiUrl = "https://cathedral-backend-server-files-6.onrender.com/api/events/all";
 
   @override
   void initState() {
     super.initState();
     _fetchLiveCathedralEvents();
+
+
+    _searchController.addListener(_executeLocalSearchFilter);
   }
 
-  // 🎯 PULL TO REFRESH MANDATE: Handled natively as a returnable Future block
+  @override
+  void dispose() {
+    _searchController.removeListener(_executeLocalSearchFilter);
+    _searchController.dispose();
+    super.dispose();
+  }
+  void _toggleEventSort() {
+    setState(() {
+      _isNewestFirst = !_isNewestFirst;
+
+      if (_isNewestFirst) {
+        // Sort by ID Descending.
+        _serverEvents.sort((a, b) => (b['id'] ?? 0).compareTo(a['id'] ?? 0));
+      } else {
+
+        _serverEvents.sort((a, b) => (a['id'] ?? 0).compareTo(b['id'] ?? 0));
+      }
+    });
+  }
+
+  void _executeLocalSearchFilter() {
+    final String query = _searchController.text.trim().toLowerCase();
+
+    setState(() {
+      if (query.isEmpty) {
+
+        _serverEvents = List.from(_allServerEvents);
+      } else {
+        _serverEvents = _allServerEvents.where((event) {
+          final String eventTitle = (event['eventTitle'] ?? '').toString().toLowerCase();
+          final String description = (event['description'] ?? '').toString().toLowerCase();
+
+          return eventTitle.contains(query) || description.contains(query);
+        }).toList();
+      }
+    });
+  }
+
   Future<void> _handleRefreshEventStream() async {
     print('🔄 Cathedral User pulled to refresh the events dashboard...');
     await _fetchLiveCathedralEvents();
   }
 
-  // HTTP Network function to hit Spring Boot Controller
+
   Future<void> _fetchLiveCathedralEvents() async {
     try {
       final response = await http.get(Uri.parse(_apiUrl));
       if (response.statusCode == 200) {
         if (!mounted) return;
+
+        final List<dynamic> decodedData = jsonDecode(response.body);
+
         setState(() {
-          _serverEvents = jsonDecode(response.body);
+          _allServerEvents = decodedData;
           _isLoading = false;
-        }); // end of setState
+        });
+        _executeLocalSearchFilter();
       } else {
         if (!mounted) return;
         setState(() => _isLoading = false);
-      } // end of response checks
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-    } // end of try-catch block
-  } // end of _fetchLiveCathedralEvents function
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TextField(
+            controller: _searchController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Search for events...',
-              prefixIcon: const Icon(Icons.search),
+              hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+              prefixIcon: Icon(Icons.search, color: isDark ? Colors.white54 : Colors.grey),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                icon: const Icon(Icons.clear, size: 20),
+                onPressed: () => _searchController.clear(),
+              )
+                  : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(30),
-                borderSide: const BorderSide(color: Colors.grey),
+                borderSide: BorderSide(color: isDark ? Colors.white24 : Colors.grey),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: const BorderSide(color: Color(0xFF0D47A1), width: 1.5),
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ), // end of InputDecoration
-          ), // end of TextField
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Showing: ${_isNewestFirst ? 'Newest Uploads' : 'Oldest Uploads'}",
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _toggleEventSort,
+                  icon: Icon(
+                    _isNewestFirst ? Icons.arrow_downward : Icons.arrow_upward,
+                    size: 16,
+                    color: const Color(0xFF0D47A1), // Matches your brand blue
+                  ),
+                  label: Text(
+                    "Sort Order",
+                    style: TextStyle(
+                      color: const Color(0xFF0D47A1),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    backgroundColor: Colors.blue.shade50,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 20),
           const Text(
             'Upcoming events.',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.redAccent),
           ),
           const SizedBox(height: 10),
-
-          // Dynamic Rendering Body Layout Layer
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
               color: const Color(0xFF0D47A1),
-              backgroundColor: Colors.white,
-              onRefresh: _handleRefreshEventStream, // 🎯 Connected cleanly here!
+              backgroundColor: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+              onRefresh: _handleRefreshEventStream,
               child: _serverEvents.isEmpty
                   ? ListView(
-                // ⚡ Keep the view pullable even when empty
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
                   SizedBox(height: MediaQuery.of(context).size.height * 0.2),
-                  const Center(
+                  Center(
                     child: Text(
-                      'No internet connection or events are not ready.\nPull down to try again!',
+                      _searchController.text.isNotEmpty
+                          ? 'No events match your search term.'
+                          : 'No internet connection or events are not ready.\nPull down to try again!',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
+                      style: const TextStyle(color: Colors.grey),
                     ),
                   ),
                 ],
               )
                   : ListView.builder(
-                // ⚡ Keep view elastic for small service listing cards
+
                 physics: const AlwaysScrollableScrollPhysics(),
                 itemCount: _serverEvents.length,
                 itemBuilder: (context, index) {
                   final event = _serverEvents[index];
-                  return buildEventCard(event
-                    //event['id'],
-                   // event['eventTitle'] ?? 'Cathedral Service',
-                  //  event['description'] ?? 'Join us in fellowship',
-                  //  Icons.church,
-                  ); // end of return buildEventCard
-                }, // end of itemBuilder lambda
-              ), // end of ListView.builder
-            ), // end of RefreshIndicator
-          ) // end of Expanded
-        ], // end of primary Column children array
-      ), // end of primary Column widget
-    ); // end of return Padding
+                  return buildEventCard(event); // end of return buildEventCard
+                },
+              ),
+            ),
+          )
+        ],
+      ),
+    );
   } // end of Widget build
 
-  // Interactive Card Render Method Helper
   Widget buildEventCard(Map<String, dynamic> event) {
     final int id = event['id'] ?? 0;
     final String title = event['eventTitle'] ?? 'Cathedral Service';
-    final String subtitle = event['description'] ?? 'Join us in fellowship';
+    final String fullDescription = event['description'] ?? 'Join us in fellowship';
+    final String? imageUrl = event['imageUrl']; // Fetched dynamically from Render PostgreSQL DB
+
+
+    String displayDescription = fullDescription;
+    if (displayDescription.length > 60) {
+      displayDescription = "${displayDescription.substring(0, 60)}...";
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       height: 180,
       decoration: BoxDecoration(
-        color: const Color(0xFF0D47A1), // Solid fallback brand color while asset loads
+        color: const Color(0xFF0D47A1),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -455,15 +717,41 @@ class _EventsPageState extends State<EventsPage> {
             offset: const Offset(0, 5),
           ),
         ],
-        image: const DecorationImage(
-          // Uses your local asset image folder for Reverend Ann
-          image: AssetImage('assets/icim/ann.png'),
-          fit: BoxFit.cover,
-        ),
       ),
       child: Stack(
         children: [
-          // 🕶️ DARK OPACITY OVERLAY SHIELD: Keeps typography perfectly legible
+          // DYNAMIC IMAGE
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: imageUrl != null && imageUrl.isNotEmpty
+                  ? Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white70),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  print(" Image network error on event '$title': $error");
+                  print(" Event Map Data: $event");
+                  // DEFAULT IMAGE
+                  return Image.asset(
+                    'assets/icim/ann.png',
+                    fit: BoxFit.cover,
+                  );
+                },
+              )
+                  : Image.asset(
+                'assets/icim/ann.png',
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
@@ -472,13 +760,13 @@ class _EventsPageState extends State<EventsPage> {
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.black.withOpacity(0.15),
-                  Colors.black.withOpacity(0.75),
+                  Colors.black.withOpacity(0.80),
                 ],
               ),
             ),
           ),
 
-          // MAIN CARD CONTENT PADDING
+          // MAIN CARD CONTENT
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -486,7 +774,7 @@ class _EventsPageState extends State<EventsPage> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
 
-                // TEXT CONTENT LAYER (Bottom-Left)
+
                 Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.end,
@@ -520,7 +808,7 @@ class _EventsPageState extends State<EventsPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        subtitle,
+                        displayDescription, // 60-character trimmed
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -535,50 +823,43 @@ class _EventsPageState extends State<EventsPage> {
 
                 const SizedBox(width: 12),
 
-                // 🚀 INTERACTIVE FLOATING ACK SIGN LOGO (Right Side - No surrounding container box)
+                // INTERACTIVE FLOATING ACK SIGN LOGO (Tapping views full text on details screen)
                 GestureDetector(
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => EventDetailsScreen(eventItem: event),
+                        builder: (context) => EventDetailsScreen(eventItem: event), // Receives full payload
                       ),
                     ).then((value) {
-                      _fetchLiveCathedralEvents();
+                      _fetchLiveCathedralEvents(); // Reloads list when coming back
                     });
                   },
-
                   child: Image.asset(
-
-                    'assets/icim/symbol.png', // The path to your drawn shield logo asset
-                    height: 55,            // Clean display size matching the drawing height
+                    'assets/icim/cathsign.jpg',
+                    height: 55,
                     width: 40,
                     fit: BoxFit.contain,
                     errorBuilder: (context, error, stackTrace) {
-                      // Graceful text fallback if the image asset isn't added to pubspec.yaml yet
                       return const Icon(
                         Icons.church,
                         color: Colors.amberAccent,
                         size: 36,
                       );
                     },
-
                   ),
                 ),
-
               ],
             ),
           ),
         ],
       ),
     );
-  } // end of buildEventCard function
+  }
 } // end of _EventsPageState class
 
 
-// ====================================================================
-// 🔥 MODIFIED HIGHLIGHT AREA: Dynamic OtherActivitiesPage Stream
-// ====================================================================
+
 class OtherActivitiesPage extends StatefulWidget {
   const OtherActivitiesPage({super.key});
 
@@ -587,17 +868,61 @@ class OtherActivitiesPage extends StatefulWidget {
 }
 
 class _OtherActivitiesPageState extends State<OtherActivitiesPage> {
+  final TextEditingController _searchController = TextEditingController();
+
+
+  List<dynamic> _allAnnouncements = [];
+  List<dynamic> _allBishopSchedules = [];
+
+
   List<dynamic> _announcements = [];
   List<dynamic> _bishopSchedules = [];
   bool _isLoading = true;
 
-  // Uses your exact local server endpoint configurations
-  final String _apiUrl = "http://10.34.113.23:8080/api/events/all";
+
+  final String _apiUrl = "https://cathedral-backend-server-files-6.onrender.com/api/events/all";
 
   @override
   void initState() {
     super.initState();
     _fetchOtherActivities();
+
+
+    _searchController.addListener(_executeActivitiesFilter);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_executeActivitiesFilter);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+
+  void _executeActivitiesFilter() {
+    final String query = _searchController.text.trim().toLowerCase();
+
+    setState(() {
+      if (query.isEmpty) {
+        // Restore fully cached arrays immediately if text field is empty
+        _announcements = List.from(_allAnnouncements);
+        _bishopSchedules = List.from(_allBishopSchedules);
+      } else {
+        // Filter Announcements stream inline
+        _announcements = _allAnnouncements.where((item) {
+          final String title = (item['eventTitle'] ?? '').toString().toLowerCase();
+          final String desc = (item['description'] ?? '').toString().toLowerCase();
+          return title.contains(query) || desc.contains(query);
+        }).toList();
+
+        // Filter Bishop Schedules stream inline
+        _bishopSchedules = _allBishopSchedules.where((item) {
+          final String title = (item['eventTitle'] ?? '').toString().toLowerCase();
+          final String desc = (item['description'] ?? '').toString().toLowerCase();
+          return title.contains(query) || desc.contains(query);
+        }).toList();
+      }
+    });
   }
 
   Future<void> _handleRefreshActivitiesStream() async {
@@ -612,11 +937,14 @@ class _OtherActivitiesPageState extends State<OtherActivitiesPage> {
 
         if (!mounted) return;
         setState(() {
-          // Filters stream variables contextually based on your database updateType values
-          _announcements = allData.where((item) => item['updateType'] == 'ANNOUNCEMENT').toList();
-          _bishopSchedules = allData.where((item) => item['updateType'] == 'BISHOP_SCHEDULE').toList();
+          // Commit stream updates directly to reference storage structures
+          _allAnnouncements = allData.where((item) => item['updateType'] == 'ANNOUNCEMENT').toList();
+          _allBishopSchedules = allData.where((item) => item['updateType'] == 'BISHOP_SCHEDULE').toList();
           _isLoading = false;
         });
+
+
+        _executeActivitiesFilter();
       } else {
         if (!mounted) return;
         setState(() => _isLoading = false);
@@ -629,76 +957,149 @@ class _OtherActivitiesPageState extends State<OtherActivitiesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return RefreshIndicator(
-      color: const Color(0xFF0D47A1),
-      backgroundColor: Colors.white,
-      onRefresh: _handleRefreshActivitiesStream,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // 📢 SECTION 1: ANNOUNCEMENTS
-          const Text('Announcements', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          if (_announcements.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10.0),
-              child: Text('No active church announcements available.', style: TextStyle(color: Colors.grey)),
-            )
-          else
-            ..._announcements.map((item) {
-              return Card(
-                color: Colors.yellow.shade50,
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  leading: const Icon(Icons.campaign, color: Colors.orange),
-                  title: Text(item['eventTitle'] ?? 'Announcement'),
-                  subtitle: Text(item['description'] ?? ''),
+    return Column(
+      children: [
+
+        Padding(
+          padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 16.0, bottom: 4.0),
+          child: TextField(
+            controller: _searchController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              hintText: 'Search announcements & schedules...',
+              hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+              prefixIcon: Icon(Icons.search, color: isDark ? Colors.white54 : Colors.grey),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                icon: const Icon(Icons.clear, size: 20),
+                onPressed: () => _searchController.clear(),
+              )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: BorderSide(color: isDark ? Colors.white24 : Colors.grey),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: const BorderSide(color: Color(0xFF0D47A1), width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+          ),
+        ),
+
+        // MAIN ADAPTIVE CONTENT LISTENER
+        Expanded(
+          child: RefreshIndicator(
+            color: const Color(0xFF0D47A1),
+            backgroundColor: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            onRefresh: _handleRefreshActivitiesStream,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16.0),
+              children: [
+                //  ANNOUNCEMENTS
+                Text(
+                  'Announcements',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
                 ),
-              );
-            }),
-
-          const SizedBox(height: 20),
-
-          // 💜 SECTION 2: BISHOP SCHEDULES
-          const Text('Bishop Schedule', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          if (_bishopSchedules.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10.0),
-              child: Text('No upcoming bishop visitations scheduled.', style: TextStyle(color: Colors.grey)),
-            )
-          else
-            ..._bishopSchedules.map((item) {
-              // Extracting and shortening date string safely if present (e.g. 2026-06-14 -> June 14 approximation)
-              String displayDate = "Visits";
-              if (item['eventDate'] != null && item['eventDate'].toString().length >= 10) {
-                displayDate = item['eventDate'].toString().substring(5, 10).replaceAll('-', '/');
-              }
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  leading: const Icon(Icons.workspace_premium, color: Colors.purple),
-                  title: Text(item['eventTitle'] ?? 'Confirmation Service'),
-                  subtitle: Text(item['description'] ?? ''),
-                  trailing: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 10),
+                if (_announcements.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10.0),
                     child: Text(
-                      displayDate,
-                      style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold),
+                      _searchController.text.isNotEmpty
+                          ? 'No matching announcements found.'
+                          : 'No active church announcements available.',
+                      style: const TextStyle(color: Colors.grey),
                     ),
-                  ),
+                  )
+                else
+                  ..._announcements.map((item) {
+                    return Card(
+                      color: isDark ? const Color(0xFF1E1E24) : Colors.yellow.shade50,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: ListTile(
+                        leading: const Icon(Icons.campaign, color: Colors.orange),
+                        title: Text(
+                          item['eventTitle'] ?? 'Announcement',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
+                        ),
+                        subtitle: Text(
+                          item['description'] ?? '',
+                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                        ),
+                      ),
+                    );
+                  }),
+
+                const SizedBox(height: 20),
+
+                // BISHOP SCHEDULES
+                Text(
+                  'Bishop Schedule',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
                 ),
-              );
-            }),
-        ],
-      ),
+                const SizedBox(height: 10),
+                if (_bishopSchedules.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10.0),
+                    child: Text(
+                      _searchController.text.isNotEmpty
+                          ? 'No matching visitation tracks.'
+                          : 'No upcoming bishop visitations scheduled.',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  )
+                else
+                  ..._bishopSchedules.map((item) {
+                    String displayDate = "Visits";
+                    if (item['eventDate'] != null && item['eventDate'].toString().length >= 10) {
+                      displayDate = item['eventDate'].toString().substring(5, 10).replaceAll('-', '/');
+                    }
+
+                    return Card(
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: ListTile(
+                        leading: const Icon(Icons.workspace_premium, color: Colors.purple),
+                        title: Text(
+                          item['eventTitle'] ?? 'Confirmation Service',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
+                        ),
+                        subtitle: Text(
+                          item['description'] ?? '',
+                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                        ),
+                        trailing: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.purple.withOpacity(0.2) : Colors.purple.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            displayDate,
+                            style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -11,8 +11,15 @@ class CathedralProjectScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 🎨 DYNAMIC THEME ENGINE COUPLING
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color cardBackground = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final Color bottomBorderColor = isDark ? Colors.white24 : Colors.grey[200]!;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.redAccent),
@@ -27,11 +34,11 @@ class CathedralProjectScreen extends StatelessWidget {
             }
           },
         ),
-        title: const Text(
+        title: Text(
           'The Cathedral Grand Project',
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18),
+          style: TextStyle(color: mainTextColor, fontWeight: FontWeight.bold, fontSize: 18),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -45,8 +52,9 @@ class CathedralProjectScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _buildActionCard(
+                      context: context,
                       title: 'View Completion\nStatus',
-                      icon: Icons.analytics, // Matches your bar chart sketch
+                      icon: Icons.analytics,
                       onTap: () {
                         Navigator.push(
                           context,
@@ -58,8 +66,9 @@ class CathedralProjectScreen extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _buildActionCard(
+                      context: context,
                       title: 'Scope and\nCompletion Schedule',
-                      icon: Icons.calendar_month_outlined, // Matches your document/schedule sketch
+                      icon: Icons.calendar_month_outlined,
                       onTap: () {
                         Navigator.push(
                           context,
@@ -84,20 +93,21 @@ class CathedralProjectScreen extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
+                    color: cardBackground,
                     border: Border.all(color: Colors.redAccent, width: 1.5),
-                    borderRadius: BorderRadius.circular(30), // Rounded capsule style
+                    borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
+                      Text(
                         'Phase by phase Roadmap',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: mainTextColor),
                       ),
                       const SizedBox(width: 8),
                       Transform.rotate(
-                        angle: -0.5, // Tilts the arrow upwards slightly to match your sketch
-                        child: const Icon(Icons.trending_flat, size: 18, color: Colors.black87),
+                        angle: -0.5,
+                        child: Icon(Icons.trending_flat, size: 18, color: mainTextColor),
                       ),
                     ],
                   ),
@@ -106,30 +116,32 @@ class CathedralProjectScreen extends StatelessWidget {
               const SizedBox(height: 36),
 
               // 📜 TIER 3: Goals and Pledges Navigation Rows
-              const Text(
+              Text(
                 'Goals and Pledges.',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: mainTextColor,
                 ),
               ),
               const SizedBox(height: 12),
 
               _buildNavigationRow(
                 label: 'Project goal',
+                textColor: mainTextColor,
+                borderColor: bottomBorderColor,
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const
-                    ProjectGoalScreen()),
+                    MaterialPageRoute(builder: (context) => const ProjectGoalScreen()),
                   );
-                  // TODO: Wire up navigation
                 },
               ),
 
               _buildNavigationRow(
                 label: 'Pledge, give',
+                textColor: mainTextColor,
+                borderColor: bottomBorderColor,
                 onTap: () {
                   Navigator.push(
                     context,
@@ -144,8 +156,14 @@ class CathedralProjectScreen extends StatelessWidget {
     );
   }
 
-  // Helper builder for Tier 1 Cards
-  Widget _buildActionCard({required String title, required IconData icon, required VoidCallback onTap}) {
+  // Helper builder for Tier 1 Cards (Updated to pass context and render dynamically)
+  Widget _buildActionCard({
+    required BuildContext context,
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -153,6 +171,7 @@ class CathedralProjectScreen extends StatelessWidget {
         height: 100,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           border: Border.all(color: Colors.redAccent, width: 1.5),
           borderRadius: BorderRadius.circular(12),
         ),
@@ -163,31 +182,40 @@ class CathedralProjectScreen extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87
+                ),
               ),
             ),
-            Icon(icon, size: 28, color: Colors.black87),
+            Icon(icon, size: 28, color: isDark ? Colors.white70 : Colors.black87),
           ],
         ),
       ),
     );
   }
 
-  // Helper builder for Tier 3 Row Options
-  Widget _buildNavigationRow({required String label, required VoidCallback onTap}) {
+  // Helper builder for Tier 3 Row Options (Updated with dynamic theme parameter injectors)
+  Widget _buildNavigationRow({
+    required String label,
+    required Color textColor,
+    required Color borderColor,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16.0),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 1)),
+          border: Border(bottom: BorderSide(color: borderColor, width: 1)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
               label,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: textColor),
             ),
             const Icon(Icons.chevron_right, color: Colors.blue),
           ],

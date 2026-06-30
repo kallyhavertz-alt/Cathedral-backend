@@ -12,8 +12,8 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
   bool _agreedToIncludeFunction = false;
   final String _paybillNumber = "593225";
 
-  // Helper function to execute the native clipboard copy on the Realme C71
-  void _copyPaybillToClipboard() {
+  // Helper function to execute the clipboard copy dynamically across different themes
+  void _copyPaybillToClipboard(bool isDark) {
     Clipboard.setData(ClipboardData(text: _paybillNumber));
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -25,7 +25,8 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
             Text('Paybill $_paybillNumber copied to clipboard!'),
           ],
         ),
-        backgroundColor: const Color(0xFF0D47A1), // Cathedral Blue
+        // Softens up the banner background in dark layouts to prevent visual clashing
+        backgroundColor: isDark ? const Color(0xFF1E88E5) : const Color(0xFF0D47A1),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),
@@ -34,17 +35,34 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🎨 DYNAMIC THEME DETECTOR INJECTIONS
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color subTextColor = isDark ? Colors.white60 : Colors.black54;
+    final Color cardBackground = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final Color inputFieldBg = isDark ? const Color(0xFF161616) : Colors.grey.shade50;
+    final Color borderStrokeColor = isDark ? Colors.white24 : Colors.grey.shade300;
+    final Color dividerLineColor = isDark ? Colors.white12 : Colors.grey;
+
+    // 🎨 Adaptive Notice Card Theme Colors
+    final Color noticeCardBg = isDark ? const Color(0xFF1A2638) : Colors.blue.shade50;
+    final Color noticeCardBorder = isDark ? Colors.blue.shade900.withValues(alpha: 0.4) : Colors.blue.shade200;
+    final Color noticeCardText = isDark ? Colors.blue.shade200 : Colors.blue.shade900;
+
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () {
-            Navigator.pop(context);
-            // Clears back to main navigation safely
-          },
+          icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black),
+          onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Pledges'),
-        backgroundColor: Colors.amberAccent,
+        title: Text(
+          'Pledges',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
+        ),
+        // 💡 Blends fluidly instead of drawing a hard amber line in Dark Mode
+        backgroundColor: isDark ? Theme.of(context).scaffoldBackgroundColor : Colors.amberAccent,
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -54,13 +72,13 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ℹ️ Informative Daraja Integration Notice Box
+              // ℹ️ Informative Daraja Integration Notice Box (Adaptive Color Tuning)
               Card(
                 elevation: 0,
-                color: Colors.blue.shade50,
+                color: noticeCardBg,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: Colors.blue.shade200, width: 1),
+                  side: BorderSide(color: noticeCardBorder, width: 1),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(20.0),
@@ -69,14 +87,14 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.info_outline, color: Colors.blue.shade800, size: 24),
+                          Icon(Icons.info_outline, color: isDark ? Colors.blue.shade300 : Colors.blue.shade800, size: 24),
                           const SizedBox(width: 10),
                           Text(
                             'System Integration Notice',
                             style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue.shade900
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.blue.shade100 : Colors.blue.shade900,
                             ),
                           ),
                         ],
@@ -85,9 +103,9 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                       Text(
                         'This feature will be available when the app supports Daraja API, the collaboration with Safaricom and the Church accounts for pledge updates.',
                         style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.blue.shade900,
-                            height: 1.4
+                          fontSize: 15,
+                          color: noticeCardText,
+                          height: 1.4,
                         ),
                       ),
                     ],
@@ -109,7 +127,8 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                   child: Row(
                     children: [
                       Checkbox(
-                        activeColor: const Color(0xFF0D47A1),
+                        activeColor: isDark ? Colors.blue[400] : const Color(0xFF0D47A1),
+                        checkColor: isDark ? Colors.black : Colors.white,
                         value: _agreedToIncludeFunction,
                         onChanged: (bool? value) {
                           setState(() {
@@ -117,13 +136,13 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                           });
                         },
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'If you would like this function to be included please check below:\nI agree with that.',
                           style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.black87
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: mainTextColor,
                           ),
                         ),
                       ),
@@ -132,15 +151,15 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                 ),
               ),
 
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16.0),
-                child: Divider(color: Colors.grey),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16.0),
+                child: Divider(color: dividerLineColor),
               ),
 
               // 💳 Manual M-Pesa Payment Portal Section
-              const Text(
+              Text(
                 'To make Project Payment',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mainTextColor),
               ),
               const SizedBox(height: 20),
 
@@ -148,19 +167,19 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
+                  color: inputFieldBg,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey.shade300),
+                  border: Border.all(color: borderStrokeColor),
                 ),
                 child: Column(
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('The Paybill is:', style: TextStyle(fontSize: 15, color: Colors.black54)),
+                        Text('The Paybill is:', style: TextStyle(fontSize: 15, color: subTextColor)),
                         Text(
-                            _paybillNumber,
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black)
+                          _paybillNumber,
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: mainTextColor),
                         ),
                       ],
                     ),
@@ -168,11 +187,11 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Account no is:', style: TextStyle(fontSize: 15, color: Colors.black54)),
+                        Text('Account no is:', style: TextStyle(fontSize: 15, color: subTextColor)),
                         Container(
                           width: 140,
                           height: 4,
-                          color: Colors.black38, // Simulates your exact handwritten line field cleanly
+                          color: isDark ? Colors.white38 : Colors.black38, // Your clean custom underline field simulation
                         ),
                       ],
                     ),
@@ -182,9 +201,9 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
               const SizedBox(height: 24),
 
               // 🙏 Continuing Thanks Footnote
-              const Text(
+              Text(
                 'We hope you will continue using the app as we try to update it later. Thank you!',
-                style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic, color: Colors.black54, height: 1.4),
+                style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic, color: subTextColor, height: 1.4),
               ),
               const SizedBox(height: 32),
 
@@ -192,11 +211,11 @@ class _CathedralProjectScreenState extends State<PledgeScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
-                  onPressed: _copyPaybillToClipboard,
+                  onPressed: () => _copyPaybillToClipboard(isDark),
                   icon: const Icon(Icons.copy, size: 18, color: Colors.white),
                   label: const Text('Copy Paybill', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0D47A1), // Cathedral Corporate Blue
+                    backgroundColor: isDark ? Colors.blue[600] : const Color(0xFF0D47A1),
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

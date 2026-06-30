@@ -57,13 +57,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final group = _selectedFellowship;
       final cellgroup = _selectedcellgroup;
 
+      final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
+        builder: (context) => Center(
+          child: CircularProgressIndicator.adaptive(
+            valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.blue.shade300 : const Color(0xFF0D47A1)),
+          ),
+        ),
       );
 
-      final url = Uri.parse('http://10.34.113.23:8080/api/users/register');
+      final url = Uri.parse('http://192.168.100.33:8080/api/users/register');
 
       try {
         final response = await http.post(
@@ -86,7 +92,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Navigator.of(context, rootNavigator: true).pop();
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          // 🎯 DECODE THE GENERATED IDENTITY FROM POSTGRESQL
           final Map<String, dynamic> responseData = jsonDecode(response.body);
           final dynamic rawId = responseData['id'];
           if (rawId == null) {
@@ -95,33 +100,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
           final int registeredId = int.parse(responseData['id'].toString());
           print('🔑 SUCCESS: Lock SessionManager to unique User ID: $registeredId');
 
-          SessionManager.currentUserId = registeredId;
-
-          // 🎯 SECURE DATA ISOLATION: Lock session to this new ID instantly!
-          SessionManager.currentUserId = registeredId;
+          // 🛡️ LOCK SESSION: Use centralized manager to ensure disk persistence matches memory state
+          await SessionManager.saveUserSession(registeredId, name);
 
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('isLoggedIn', true);
-          await prefs.setInt('userId', registeredId);
           await prefs.setString('userName', name);
           await prefs.setString('userEmail', email);
 
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Account successfully created!'),
+              content: Text('Account successfully created! WELCOME TO CATHEDRAL!!'),
               backgroundColor: Colors.green,
             ),
           );
 
-          // Navigate cleanly to the dashboard dashboard
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const HomeScreen()),
-              //  (route) => false,
           );
 
         } else {
-          // Handle registration rejections cleanly
           final responseData = jsonDecode(response.body);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -134,15 +133,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
         print('Fatal network intercept error: $e');
         if (!mounted) return;
 
-        // Clean up navigation safely if a connection drops out mid-process
         try {
-          Navigator.pop(context);
+          Navigator.of(context, rootNavigator: true).pop();
         } catch (_) {}
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lost connection to server. Error: $e'),
-            backgroundColor: Colors.redAccent,
+            content: Text('No internet connection, request unreachable'),
+            backgroundColor: Colors.black38,
           ),
         );
       }
@@ -151,29 +149,81 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🎨 ACTIVE SYSTEM MODE DETECTION MATRICES
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color subTextColor = isDark ? Colors.white60 : Colors.grey.shade700;
+    final Color inputFieldBg = isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade50;
+    final Color borderStrokeColor = isDark ? Colors.white24 : Colors.grey.shade400;
+    final Color accentFocusColor = isDark ? Colors.blue.shade300 : const Color(0xFF0D47A1);
+
+    // Explicit structural decoration config for code reuse
+    InputDecoration inputThemeDecoration({required String label, required Widget prefixIcon, String? hintText}) {
+      return InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey.shade700),
+        hintText: hintText,
+        hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.grey.shade400),
+        prefixIcon: IconTheme(
+          data: IconThemeData(color: isDark ? Colors.blue.shade300 : const Color(0xFF0D47A1)),
+          child: prefixIcon,
+        ),
+        filled: true,
+        fillColor: inputFieldBg,
+        counterStyle: TextStyle(color: subTextColor),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderStrokeColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderStrokeColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: accentFocusColor, width: 1.5),
+        ),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Account')),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: IconThemeData(color: mainTextColor),
+        title: Text(
+          'Create Account',
+          style: TextStyle(color: mainTextColor, fontWeight: FontWeight.bold),
+        ),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Form(
           key: _formKey,
           child: ListView(
+            physics: const BouncingScrollPhysics(),
             children: [
-              const Text(
+              Text(
                 'Join St. James Cathedral',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: mainTextColor),
               ),
               const SizedBox(height: 8),
-              const Text('Register to access dynamic events and project tracking.'),
+              Text(
+                'Register to access dynamic events and project tracking.',
+                style: TextStyle(fontSize: 14, color: subTextColor),
+              ),
               const SizedBox(height: 32),
 
               // Full Name Field
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Full Name',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(),
+                style: TextStyle(color: mainTextColor, fontSize: 15),
+                decoration: inputThemeDecoration(
+                  label: 'Full Name',
+                  prefixIcon: const Icon(Icons.person),
                 ),
                 validator: (value) => value!.isEmpty ? 'Please enter your name' : null,
               ),
@@ -183,10 +233,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextFormField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Email Address',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(),
+                style: TextStyle(color: mainTextColor, fontSize: 15),
+                decoration: inputThemeDecoration(
+                  label: 'Email Address',
+                  prefixIcon: const Icon(Icons.email),
                 ),
                 validator: (value) => !value!.contains('@') ? 'Enter a valid email' : null,
               ),
@@ -194,14 +244,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               // Residential Cell Dropdown Menu
               DropdownButtonFormField<String>(
-                value: _selectedcellgroup,
-                hint: const Text('Select your residential group'),
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.group_sharp),
-                  border: OutlineInputBorder(),
+                initialValue: _selectedcellgroup,
+                dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                style: TextStyle(color: mainTextColor, fontSize: 15),
+                hint: Text('Select your residential group', style: TextStyle(color: isDark ? Colors.white38 : Colors.grey.shade600, fontSize: 14)),
+                decoration: inputThemeDecoration(
+                  label: 'Residential Cell',
+                  prefixIcon: const Icon(Icons.group_sharp),
                 ),
                 items: _residentialcellgroup.map((group) {
-                  return DropdownMenuItem(value: group, child: Text(group));
+                  return DropdownMenuItem(
+                    value: group,
+                    child: Text(group, style: TextStyle(color: mainTextColor)),
+                  );
                 }).toList(),
                 onChanged: (value) {
                   setState(() {
@@ -214,14 +269,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               // Fellowship Dropdown Menu
               DropdownButtonFormField<String>(
-                value: _selectedFellowship,
-                hint: const Text('Select your Fellowship Group'),
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.groups),
-                  border: OutlineInputBorder(),
+                initialValue: _selectedFellowship,
+                dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                style: TextStyle(color: mainTextColor, fontSize: 15),
+                hint: Text('Select your Fellowship Group', style: TextStyle(color: isDark ? Colors.white38 : Colors.grey.shade600, fontSize: 14)),
+                decoration: inputThemeDecoration(
+                  label: 'Fellowship Group',
+                  prefixIcon: const Icon(Icons.groups),
                 ),
                 items: _fellowshipGroups.map((group) {
-                  return DropdownMenuItem(value: group, child: Text(group));
+                  return DropdownMenuItem(
+                    value: group,
+                    child: Text(group, style: TextStyle(color: mainTextColor)),
+                  );
                 }).toList(),
                 onChanged: (value) {
                   setState(() {
@@ -236,10 +296,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextFormField(
                 controller: _passwordController,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  border: OutlineInputBorder(),
+                style: TextStyle(color: mainTextColor, fontSize: 15),
+                decoration: inputThemeDecoration(
+                  label: 'Password',
+                  prefixIcon: const Icon(Icons.lock),
                 ),
                 validator: (value) => value!.length < 6 ? 'Password must be 6+ chars' : null,
               ),
@@ -249,10 +309,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ElevatedButton(
                 onPressed: _submitRegistration,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D47A1),
+                  backgroundColor: isDark ? Colors.blue[700] : const Color(0xFF0D47A1),
                   padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: isDark ? 0 : 2,
                 ),
-                child: const Text('Sign Up', style: TextStyle(color: Colors.white, fontSize: 16)),
+                child: const Text('Sign Up', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ],
           ),

@@ -44,7 +44,14 @@ dependencies:
   firebase_messaging: ^16.3.0
   sqflite: ^2.4.3
   path: ^1.9.1
-  share_plus: ^13.1.0
+  share_plus: ^10.0.0
+  firebase_core: ^4.10.0
+  youtube_player_iframe: ^6.0.2
+  youtube_player_flutter: ^10.0.1
+  image_picker: ^1.2.2
+  file_picker: ^8.1.7
+
+
 
 
 
@@ -86,7 +93,11 @@ flutter:
     - assets/icons/final.png
     - assets/icim/background - Copy.png
     - assets/icim/ann.png
-    - assets/icim/symbol.png
+    - assets/icim/cathsign.jpg
+    - assets/icons/announce.png
+    - assets/icons/bishop.png
+    - assets/icons/default.png
+    - assets/icons/eagles.jpg
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

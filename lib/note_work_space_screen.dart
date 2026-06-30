@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:untitled/session_manager.dart';
-import 'package:untitled/local_database_helper.dart'; // 🎯 Added local cache link
+import 'package:untitled/local_database_helper.dart';
 
 class NoteWorkspaceScreen extends StatefulWidget {
   final int? noteId;         // Null if writing a new note, holds PK ID if editing
@@ -20,36 +20,37 @@ class NoteWorkspaceScreen extends StatefulWidget {
     required this.isEditing,
     this.initialTitle,
     this.initialContent,
-  }); // end of constructor
+  });
 
   @override
   State<NoteWorkspaceScreen> createState() => _NoteWorkspaceScreenState();
-} // end of NoteWorkspaceScreen class
+}
 
 class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _contentController = TextEditingController();
+  late TextEditingController _titleController;
+  late StyleTextEditingController _contentController;
+
   bool _isSaving = false;
+  bool _isBoldActive = false;
+  bool _isItalicActive = false;
+  bool _isUnderlineActive = false;
 
   @override
   void initState() {
     super.initState();
-    // If we are in edit mode, populate controllers with preexisting data rows
-    if (widget.isEditing) {
-      _titleController.text = widget.initialTitle ?? '';
-      _contentController.text = widget.initialContent ?? '';
-    } // end of edit validation check
-  } // end of initState
+    _titleController = TextEditingController(text: widget.initialTitle ?? '');
+    _contentController = StyleTextEditingController();
+    _contentController.setDecodedMarkdown(widget.initialContent ?? '');
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _contentController.dispose();
     super.dispose();
-  } // end of dispose
+  }
 
   Future<void> _saveNoteToPostgres() async {
-    // 🚫 1. Guard check: Ensure they entered a title
     if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Title can't be empty.")),
@@ -57,102 +58,111 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
       return;
     }
 
-    // 🎯 THE MASTER PAYLOAD: Gather everything into a unified map variable
     final Map<String, dynamic> notePayload = {
       "title": _titleController.text.trim(),
-      "content": _contentController.text.trim(),
-      "userId": SessionManager.currentUserId, // Automatically links it to the active logged-in member
-      "eventId": widget.eventId,              // Links to the church event (e.g., 2, 3) or 1 for generic
-      "eventTitle": widget.eventTitle,        // Keeps track of the sermon context string
-      "createdAt": DateTime.now().toIso8601String(), // Explicit ISO timestamp
+      "content": _contentController.getEncodedMarkdown(),
+      "userId": SessionManager.currentUserId,
+      "eventId": widget.eventId,
+      "eventTitle": widget.eventTitle,
+      "createdAt": DateTime.now().toIso8601String(),
     };
 
     setState(() {
       _isSaving = true;
     });
 
-    try {
-      if (widget.isEditing) {
-        // 📝 UPDATE ROUTE (PUT)
-        final String updateUrl = 'http://10.34.113.23:8080/api/notes/update/${widget.noteId}';
-        print('📡 Workspace Screen: Editing note. PUT to: $updateUrl');
+    bool networkSyncSuccess = false;
 
+    try {
+      if (widget.isEditing && widget.noteId != null) {
+        final String updateUrl = ' https://tag-player-unstuck.ngrok-free.dev/api/notes/update/${widget.noteId}';
         final response = await http.put(
           Uri.parse(updateUrl),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode(notePayload),
-        ).timeout(const Duration(seconds: 4)); // ⚡ 4-second cutoff time to avoid long hangs
+        ).timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          print("✅ Note updated successfully linked to eventId: ${widget.eventId}");
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Note updated!')));
-            Navigator.pop(context, true);
-          }
-          return;
-        } else {
-          print('❌ Server rejected update status: ${response.statusCode}');
+          networkSyncSuccess = true;
         }
-
       } else {
-        // 💾 DYNAMIC CREATE ROUTE (POST)
         final int activeId = SessionManager.currentUserId;
-        final String dynamicAddUrl = 'http://10.34.113.23:8080/api/notes/add/$activeId';
-
-        print('📡 Saving note dynamically for User ID ($activeId) to: $dynamicAddUrl');
+        final String dynamicAddUrl = 'http://192.168.100.33:8080/api/notes/add/$activeId';
 
         final response = await http.post(
           Uri.parse(dynamicAddUrl),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode(notePayload),
-        ).timeout(const Duration(seconds: 4)); // ⚡ 4-second cutoff time to trigger offline backup
-
-        print('📡 SERVER RESPONSE RECEIVED: ${response.statusCode}');
-        print('📡 RESPONSE BODY PAYLOAD: ${response.body}');
+        ).timeout(const Duration(seconds: 4));
 
         if (response.statusCode == 200 || response.statusCode == 201) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Note saved to Cathedral records!')),
-            );
-            Navigator.pop(context, true); // Drops back to My Notes screen, passing true to refresh
-          }
-          return;
-        } else {
-          print('❌ Server rejected creation status: ${response.statusCode}');
+          networkSyncSuccess = true;
         }
       }
     } catch (e) {
-      print('🚨 Network target unreachable ($e). Redirecting to local offline engine queue...');
+      print('📡 Network route offline or timed out. Diverting to local engine.');
     }
 
-    // 🛡️ OFFLINE SAFE FALLBACK LAYER
-    // If we reach this line, the internet request timed out or crashed completely.
     try {
-      if (widget.isEditing && widget.noteId != null) {
-        // If editing offline, remove old row copy first to make space for update parameters
-        await LocalDatabaseHelper.instance.deleteNote(widget.noteId!);
-      }
+      final db = await LocalDatabaseHelper.instance.database;
 
-      // Push note directly into local SQLite storage queue as PENDING
-      await LocalDatabaseHelper.instance.insertOfflineNote(notePayload);
+      if (widget.isEditing) {
+        final dynamic targetedId = widget.noteId;
+
+        if (targetedId != null) {
+          int rowsAffected = await db.update(
+            'local_notes',
+            {
+              'title': notePayload['title'],
+              'content': notePayload['content'],
+              'eventId': notePayload['eventId'],
+              'eventTitle': notePayload['eventTitle'],
+              'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
+            },
+            where: 'id = ?',
+            whereArgs: [targetedId],
+          );
+
+          if (rowsAffected == 0) {
+            await db.insert(
+              'local_notes',
+              {
+                'id': targetedId,
+                'userId': notePayload['userId'],
+                'eventId': notePayload['eventId'],
+                'eventTitle': notePayload['eventTitle'],
+                'title': notePayload['title'],
+                'content': notePayload['content'],
+                'createdAt': notePayload['createdAt'],
+                'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
+                'isFavorite': 0,
+              },
+            );
+          }
+        }
+      } else {
+        if (!networkSyncSuccess) {
+          await LocalDatabaseHelper.instance.insertOfflineNote({
+            ...notePayload,
+            'syncStatus': 'PENDING',
+          });
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Saved locally. Will sync automatically when connection restores!'),
-            backgroundColor: Colors.orange, // Distinct color indication warning
+          SnackBar(
+            content: Text(networkSyncSuccess
+                ? 'Note synchronized to Cathedral records!'
+                : 'Saved locally to device storage!'),
+            backgroundColor: networkSyncSuccess ? Colors.green : Colors.orange,
+            behavior: SnackBarBehavior.floating,
           ),
         );
         Navigator.pop(context, true);
       }
     } catch (dbError) {
-      print('🚨 Failed writing backup to local SQLite storage engine: $dbError');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving note data: $dbError')),
-        );
-      }
+      print('🚨 Critical SQLite Failure: $dbError');
     } finally {
       if (mounted) {
         setState(() {
@@ -160,48 +170,52 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
         });
       }
     }
-  } // end of _saveNoteToPostgres function
+  }
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color headingLabelColor = isDark ? Colors.white60 : Colors.grey;
+    final Color dividerLineColor = isDark ? Colors.white24 : Colors.black12;
+    final Color iconActionButtonColor = isDark ? Colors.blue.shade400 : const Color(0xFF0D47A1);
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () {
-            Navigator.pop(context);
-          }, // end of onPressed
-        ), // end of leading IconButton
-        title: const Text(
-          'My Notes',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ), // end of title Text
+          icon: Icon(Icons.arrow_back, color: mainTextColor),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          widget.isEditing ? 'Edit Note' : 'New Note',
+          style: TextStyle(color: mainTextColor, fontWeight: FontWeight.bold),
+        ),
         actions: [
-          // Dynamic Character Counter matching your "7/17" layout notebook sketch
           Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
               child: Text(
                 '${_titleController.text.length}/${_titleController.text.length + _contentController.text.length}',
-                style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold),
-              ), // end of Text
-            ), // end of Padding
-          ), // end of Center
+                style: TextStyle(color: headingLabelColor, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
           _isSaving
-              ? const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
-            child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-          ) // end of internal loading Padding
+              ? Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: iconActionButtonColor))),
+          )
               : IconButton(
-            icon: const Icon(Icons.save_alt, color: Color(0xFF0D47A1), size: 28),
+            icon: Icon(Icons.save, color: iconActionButtonColor, size: 28),
             onPressed: _saveNoteToPostgres,
-          ), // end of conditional save IconButton
+          ),
           const SizedBox(width: 8),
-        ], // end of actions array
-      ), // end of AppBar
+        ],
+      ),
       body: Stack(
         children: [
           Padding(
@@ -209,91 +223,254 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 📝 NOTEBOOK SKETCH FIELD: Title Input Area
-                const Text(
+                Text(
                   'Title',
-                  style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.w500),
-                ), // end of Text
+                  style: TextStyle(fontSize: 16, color: headingLabelColor, fontWeight: FontWeight.w500),
+                ),
                 TextField(
                   controller: _titleController,
                   maxLines: 1,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87),
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. palm Sunday',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: mainTextColor),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. Palm Sunday',
+                    hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
                     border: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(vertical: 6),
-                  ), // end of InputDecoration
-                  onChanged: (val) => setState(() {}), // Force rebuild to update top string length counter
-                ), // end of Title TextField
-                const Divider(height: 20, thickness: 1, color: Colors.black12),
+                  ),
+                  onChanged: (val) => setState(() {}),
+                ),
+                Divider(height: 20, thickness: 1, color: dividerLineColor),
                 const SizedBox(height: 10),
-
-                // 📝 NOTEBOOK SKETCH FIELD: Content Document Workspace Writing Layer
-                const Text(
+                Text(
                   'Content',
-                  style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.w500),
-                ), // end of Text
+                  style: TextStyle(fontSize: 16, color: headingLabelColor, fontWeight: FontWeight.w500),
+                ),
                 Expanded(
                   child: TextField(
                     controller: _contentController,
-                    maxLines: null, // Allows endless multi-line typing expansion vertical tracking
+                    maxLines: null,
                     keyboardType: TextInputType.multiline,
-                    style: const TextStyle(fontSize: 16, height: 1.5, color: Colors.black87),
-                    decoration: const InputDecoration(
+                    style: TextStyle(fontSize: 16, height: 1.5, color: mainTextColor),
+                    decoration: InputDecoration(
                       hintText: 'Start writing your sermon notes here...',
+                      hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
                       border: InputBorder.none,
-                    ), // end of InputDecoration
-                    onChanged: (val) => setState(() {}), // Sync workspace string counter variables
-                  ), // end of Content TextField
-                ), // end of Expanded
-              ], // end of main column items array
-            ), // end of primary Column widget
-          ), // end of primary Padding container
-
-          // 🎨 NOTEBOOK SKETCH FIELD: Bottom Toolbar formatting buttons (B / I / U) pinned to lower right
+                    ),
+                    onChanged: (val) => setState(() {}),
+                  ),
+                ),
+              ],
+            ),
+          ),
           Positioned(
             bottom: 20,
             right: 20,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildFormatButton('B'),
+                _buildFormatButton('B', _isBoldActive, isDark, mainTextColor),
                 const SizedBox(width: 8),
-                _buildFormatButton('I'),
+                _buildFormatButton('I', _isItalicActive, isDark, mainTextColor),
                 const SizedBox(width: 8),
-                _buildFormatButton('U'),
-              ], // end of formatting row array
-            ), // end of format container Row
-          ), // end of Positioned toolbar layer
-        ], // end of principal Stack elements array
-      ), // end of Scaffold body Stack
-    ); // end of return Scaffold
-  } // end of Widget build
+                _buildFormatButton('U', _isUnderlineActive, isDark, mainTextColor),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-  // Formatting utility builder to render square options matching layout cells perfectly
-  Widget _buildFormatButton(String label) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black45, width: 1.2),
-        borderRadius: BorderRadius.circular(6),
-      ), // end of BoxDecoration
-      child: Center(
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: label == 'B' ? FontWeight.bold : FontWeight.normal,
-            fontStyle: label == 'I' ? FontStyle.italic : FontStyle.normal,
-            decoration: label == 'U' ? TextDecoration.underline : TextDecoration.none,
-            fontSize: 16,
-            color: Colors.black87,
-          ), // end of TextStyle
-        ), // end of Center Text
-      ), // end of Center
-    ); // end of return Container
-  } // end of _buildFormatButton function
+  Widget _buildFormatButton(String label, bool isActive, bool isDark, Color mainTextColor) {
+    final Color activeColor = isDark ? Colors.blue.shade600 : const Color(0xFF0D47A1);
+    final Color inactiveBgColor = isDark ? const Color(0xFF2C2C2C) : Colors.white;
+    final Color strokeColor = isDark ? Colors.white24 : Colors.black45;
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          if (label == 'B') {
+            _isBoldActive = !_isBoldActive;
+            _contentController.toggleStyle('B', _isBoldActive);
+          } else if (label == 'I') {
+            _isItalicActive = !_isItalicActive;
+            _contentController.toggleStyle('I', _isItalicActive);
+          } else if (label == 'U') {
+            _isUnderlineActive = !_isUnderlineActive;
+            _contentController.toggleStyle('U', _isUnderlineActive);
+          }
+
+          final currentSelection = _contentController.selection;
+          _contentController.text = _contentController.text;
+          _contentController.selection = currentSelection;
+        });
+      },
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isActive ? activeColor : inactiveBgColor,
+          border: Border.all(color: isActive ? activeColor : strokeColor, width: 1.2),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: label == 'B' ? FontWeight.bold : FontWeight.normal,
+              fontStyle: label == 'I' ? FontStyle.italic : FontStyle.normal,
+              decoration: label == 'U' ? TextDecoration.underline : TextDecoration.none,
+              fontSize: 16,
+              color: isActive ? Colors.white : mainTextColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class StyleTextEditingController extends TextEditingController {
+  bool isBold = false;
+  bool isItalic = false;
+  bool isUnderline = false;
+
+  List<TextAttributeChange> styleRuns = [];
+
+  void toggleStyle(String type, bool isActive) {
+    if (type == 'B') isBold = isActive;
+    if (type == 'I') isItalic = isActive;
+    if (type == 'U') isUnderline = isActive;
+
+    final int cursor = selection.baseOffset;
+    if (cursor >= 0) {
+      styleRuns.add(TextAttributeChange(
+        start: cursor,
+        isBold: isBold,
+        isItalic: isItalic,
+        isUnderline: isUnderline,
+      ));
+    }
+  }
+
+  /// 💾 THE DELTA ENCODER: Upgraded to safely loop characters without breaking emojis
+  String getEncodedMarkdown() {
+    if (text.isEmpty) return '';
+    StringBuffer buffer = StringBuffer();
+    final charactersList = text.characters.toList();
+
+    for (int i = 0; i < charactersList.length; i++) {
+      bool charBold = false;
+      bool charItalic = false;
+      bool charUnderline = false;
+
+      for (var run in styleRuns) {
+        if (i >= run.start) {
+          charBold = run.isBold;
+          charItalic = run.isItalic;
+          charUnderline = run.isUnderline;
+        }
+      }
+
+      if (charBold) buffer.write('🍉B');
+      if (charItalic) buffer.write('🍉I');
+      if (charUnderline) buffer.write('🍉U');
+
+      buffer.write(charactersList[i]);
+    }
+    return buffer.toString();
+  }
+
+  /// 🏛️ THE DELTA DECODER: Upgraded text extraction handling safely
+  void setDecodedMarkdown(String rawData) {
+    if (rawData.isEmpty) {
+      text = '';
+      styleRuns.clear();
+      return;
+    }
+
+    StringBuffer cleanText = StringBuffer();
+    List<TextAttributeChange> parsedRuns = [];
+
+    int cursorCounter = 0;
+    final charactersList = rawData.characters.toList();
+    int index = 0;
+
+    while (index < charactersList.length) {
+      bool workingBold = false;
+      bool workingItalic = false;
+      bool workingUnderline = false;
+
+      while (index < charactersList.length - 2 && charactersList[index] == '🍉') {
+        String flag = charactersList[index + 1];
+        if (flag == 'B') workingBold = true;
+        if (flag == 'I') workingItalic = true;
+        if (flag == 'U') workingUnderline = true;
+        index += 2;
+      }
+
+      if (index < charactersList.length) {
+        cleanText.write(charactersList[index]);
+
+        parsedRuns.add(TextAttributeChange(
+          start: cursorCounter,
+          isBold: workingBold,
+          isItalic: workingItalic,
+          isUnderline: workingUnderline,
+        ));
+
+        cursorCounter++;
+        index++;
+      }
+    }
+
+    text = cleanText.toString();
+    styleRuns = parsedRuns;
+  }
+
+  /// 🎨 TEXTSPAN BUILDER: Renders emojis completely unbroken inside your rich text field
+  @override
+  TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
+    final TextStyle defaultStyle = style ?? const TextStyle();
+    if (text.isEmpty) return TextSpan(text: '', style: defaultStyle);
+
+    final List<TextSpan> children = [];
+    final charactersList = text.characters.toList();
+
+    for (int i = 0; i < charactersList.length; i++) {
+      bool charBold = false;
+      bool charItalic = false;
+      bool charUnderline = false;
+
+      for (var run in styleRuns) {
+        if (i >= run.start) {
+          charBold = run.isBold;
+          charItalic = run.isItalic;
+          charUnderline = run.isUnderline;
+        }
+      }
+
+      TextStyle dynamicStyle = defaultStyle;
+      if (charBold) dynamicStyle = dynamicStyle.copyWith(fontWeight: FontWeight.bold);
+      if (charItalic) dynamicStyle = dynamicStyle.copyWith(fontStyle: FontStyle.italic);
+      if (charUnderline) dynamicStyle = dynamicStyle.copyWith(decoration: TextDecoration.underline);
+
+      children.add(TextSpan(text: charactersList[i], style: dynamicStyle));
+    }
+
+    return TextSpan(style: defaultStyle, children: children);
+  }
+}
+
+class TextAttributeChange {
+  final int start;
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderline;
+
+  TextAttributeChange({
+    required this.start,
+    required this.isBold,
+    required this.isItalic,
+    required this.isUnderline,
+  });
 }

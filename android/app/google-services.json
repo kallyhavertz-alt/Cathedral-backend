@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "750085980351",
+    "project_id": "ack-app-89a48",
+    "storage_bucket": "ack-app-89a48.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:750085980351:android:d0453673dc0c47d2f1460a",
+        "android_client_info": {
+          "package_name": "com.example.untitled"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBtkjZq4jrRynhG76Lnz_Z-2Z46okidOQc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

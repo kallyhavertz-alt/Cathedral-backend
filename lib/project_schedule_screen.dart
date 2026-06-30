@@ -14,18 +14,33 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🎨 DYNAMIC THEME ENGINE INTEGRATIONS
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color subTextColor = isDark ? Colors.white70 : Colors.grey[800]!;
+    final Color traceTextColor = isDark ? Colors.white60 : Colors.grey[600]!;
+
+    final Color summaryBoxBg = isDark ? const Color(0xFF161616) : Colors.grey[50]!;
+    final Color cardBackground = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final Color borderStrokeColor = isDark ? Colors.white24 : Colors.grey[300]!;
+    final Color inlineDividerColor = isDark ? Colors.white12 : Colors.grey[200]!;
+
+    // 🎨 Adaptive tint for Zone 4 Probability Container
+    final Color probabilityBg = isDark ? const Color(0xFF2C1A1A) : const Color(0xFFFFF5F5);
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.redAccent),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'Scope & Completion Schedule',
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 17),
+          style: TextStyle(color: mainTextColor, fontWeight: FontWeight.bold, fontSize: 17),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -35,25 +50,37 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 📝 ZONE 1: Summary Box Description
+              // 📝 ZONE 1: Summary Box Description (Themed)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16.0),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: summaryBoxBg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[200]!),
+                  border: Border.all(color: borderStrokeColor),
                 ),
                 child: RichText(
                   text: TextSpan(
-                    style: const TextStyle(fontSize: 14.5, color: Colors.black87, height: 1.5),
+                    style: TextStyle(fontSize: 14.5, color: mainTextColor, height: 1.5),
                     children: [
                       const TextSpan(text: "The "),
                       const TextSpan(text: "ACK grand project", style: TextStyle(fontWeight: FontWeight.bold)),
                       const TextSpan(text: " started on "),
-                      TextSpan(text: startDate, style: const TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600)),
+                      TextSpan(
+                        text: startDate,
+                        style: TextStyle(
+                            color: isDark ? Colors.blue[400] : const Color(0xFF0D47A1),
+                            fontWeight: FontWeight.w600
+                        ),
+                      ),
                       const TextSpan(text: " and it is still ongoing. This project is scheduled to finish at "),
-                      TextSpan(text: estimatedEndDate, style: const TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600)),
+                      TextSpan(
+                        text: estimatedEndDate,
+                        style: TextStyle(
+                            color: isDark ? Colors.blue[400] : const Color(0xFF0D47A1),
+                            fontWeight: FontWeight.w600
+                        ),
+                      ),
                       const TextSpan(text: "."),
                     ],
                   ),
@@ -66,43 +93,43 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 4.0),
                 child: Text(
                   'Continue coming back to this page for more information on schedule date changes and more.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600], fontStyle: FontStyle.italic, height: 1.4),
+                  style: TextStyle(fontSize: 13, color: traceTextColor, fontStyle: FontStyle.italic, height: 1.4),
                 ),
               ),
               const SizedBox(height: 32),
 
-              // 📊 ZONE 3: Calendar and Comparison Metrics Block
-              const Text(
+              // 📊 ZONE 3: Calendar and Comparison Metrics Block (Themed)
+              Text(
                 'Calendar and Comparison.',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mainTextColor),
               ),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16.0),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cardBackground,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
+                  border: Border.all(color: borderStrokeColor),
                 ),
                 child: Column(
                   children: [
-                    _buildMetricRow('Current Completion', '90%', Colors.green),
-                    const Divider(height: 20),
-                    _buildMetricRow('Remaining', '10%', Colors.orange),
-                    const Divider(height: 20),
-                    _buildMetricRow('End date', 'Dec 2026', const Color(0xFF0D47A1)),
+                    _buildMetricRow('Current Completion', '90%', Colors.green, mainTextColor),
+                    Divider(height: 20, color: inlineDividerColor),
+                    _buildMetricRow('Remaining', '10%', Colors.orange, mainTextColor),
+                    Divider(height: 20, color: inlineDividerColor),
+                    _buildMetricRow('End date', 'Dec 2026', isDark ? Colors.blue[300]! : const Color(0xFF0D47A1), mainTextColor),
                   ],
                 ),
               ),
               const SizedBox(height: 32),
 
-              // 📉 ZONE 4: Timeline Probability Section
+              // 📉 ZONE 4: Timeline Probability Section (Themed & Tint-Protected)
               Container(
                 padding: const EdgeInsets.all(16.0),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF5F5), // Light reddish tint background highlighting the metric assessment
+                  color: probabilityBg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,16 +139,16 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildProbabilityRow('Possibility to meet this', '70%', Colors.green[700]!),
+                          _buildProbabilityRow('Possibility to meet this', '70%', isDark ? Colors.green[400]! : Colors.green[700]!, subTextColor),
                           const SizedBox(height: 12),
-                          _buildProbabilityRow('Not sure', '5%', Colors.amber[800]!),
+                          _buildProbabilityRow('Not sure', '5%', isDark ? Colors.amber[400]! : Colors.amber[800]!, subTextColor),
                           const SizedBox(height: 12),
-                          _buildProbabilityRow('Not to meet at all', '25%', Colors.redAccent),
+                          _buildProbabilityRow('Not to meet at all', '25%', Colors.redAccent, subTextColor),
                         ],
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // 💡 Your right-hand accent indicator column
+                    // 💡 Your right-hand accent indicator column remains vibrant
                     Container(
                       width: 4,
                       height: 85,
@@ -140,14 +167,14 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
     );
   }
 
-  // Helper widget builder for Zone 3 standard rows
-  Widget _buildMetricRow(String label, String value, Color valueColor) {
+  // Helper widget builder for Zone 3 standard rows (Injected theme colors)
+  Widget _buildMetricRow(String label, String value, Color valueColor, Color labelColor) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.black87),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: labelColor),
         ),
         Text(
           value,
@@ -157,14 +184,14 @@ class _ProjectScheduleScreenState extends State<ProjectScheduleScreen> {
     );
   }
 
-  // Helper widget builder for Zone 4 probability rows
-  Widget _buildProbabilityRow(String label, String percentage, Color color) {
+  // Helper widget builder for Zone 4 probability rows (Injected theme colors)
+  Widget _buildProbabilityRow(String label, String percentage, Color color, Color labelColor) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey[800]),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: labelColor),
         ),
         Text(
           percentage,

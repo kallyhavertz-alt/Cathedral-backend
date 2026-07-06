@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:untitled/completion_status_screen.dart';
+import 'package:untitled/giving_screen.dart';
 import 'package:untitled/phase_roadmap_screen.dart';
 import 'package:untitled/project_schedule_screen.dart';
 import 'package:untitled/pledge_screen.dart';
@@ -64,7 +65,7 @@ class CathedralProjectScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
+                 /* Expanded(
                     child: _buildActionCard(
                       context: context,
                       title: 'Scope and\nCompletion Schedule',
@@ -77,12 +78,14 @@ class CathedralProjectScreen extends StatelessWidget {
                       },
                     ),
                   ),
+
+                  */
                 ],
               ),
               const SizedBox(height: 16),
 
               // 💊 TIER 2: Phase by Phase Roadmap Capsule Button
-              InkWell(
+             /* InkWell(
                 onTap: () {
                   Navigator.push(
                     context,
@@ -111,8 +114,12 @@ class CathedralProjectScreen extends StatelessWidget {
                       ),
                     ],
                   ),
+
+
                 ),
               ),
+
+                  */
               const SizedBox(height: 36),
 
               // 📜 TIER 3: Goals and Pledges Navigation Rows
@@ -145,7 +152,7 @@ class CathedralProjectScreen extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const PledgeScreen()),
+                    MaterialPageRoute(builder: (context) => const GivingScreen()),
                   );
                 },
               ),

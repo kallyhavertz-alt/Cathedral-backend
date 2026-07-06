@@ -4,57 +4,13 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'package:untitled/church_schedules_screen.dart';
+import 'package:untitled/project_track.dart';
 import 'package:untitled/share_service_url_page.dart';
+import 'package:untitled/themes_screen.dart';
+import 'admin_report_dashboard_screen.dart';
 import 'notification_service.dart';
 import 'session_manager.dart';
-
-/// 🎨 Custom Controller that parses [b], [r], [g] tags into inline native UI colors while typing!
-class VividEditingController extends TextEditingController {
-  final BuildContext context;
-  VividEditingController({required this.context, String? text}) : super(text: text);
-
-  @override
-  TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color defaultColor = style?.color ?? (isDark ? Colors.white70 : Colors.black87);
-
-    final Color blueColor = isDark ? Colors.lightBlueAccent : const Color(0xFF0D47A1);
-    final Color redColor = isDark ? Colors.redAccent : const Color(0xFFC62828);
-    final Color greenColor = isDark ? Colors.greenAccent : const Color(0xFF2E7D32);
-
-    final List<TextSpan> children = [];
-   // final RegExp regExp = RegExp(r'<(b)>(.*?)</\1>|([^<]+)', dotAll: true);
-    final RegExp regExp = RegExp(r'\[([brg])\](.*?)\[\/\1\]|([^\[]+)', dotAll: true);
-    final Iterable<Match> matches = regExp.allMatches(text);
-
-    for (final Match match in matches) {
-      if (match.group(3) != null) {
-        children.add(TextSpan(text: match.group(3), style: style));
-      } else {
-        final String tag = match.group(1)!;
-        final String innerText = match.group(2) ?? '';
-
-        Color targetColor = defaultColor;
-        FontWeight weight = FontWeight.normal;
-
-        if (tag == 'b') { targetColor = blueColor; weight = FontWeight.bold; }
-        else if (tag == 'r') { targetColor = redColor; weight = FontWeight.bold; }
-        else if (tag == 'g') { targetColor = greenColor; weight = FontWeight.bold; }
-
-        children.add(TextSpan(
-          text: innerText,
-          style: style?.copyWith(color: targetColor, fontWeight: weight) ??
-              TextStyle(color: targetColor, fontWeight: weight),
-        ));
-      }
-    }
-
-    if (children.isEmpty) {
-      return TextSpan(text: text, style: style);
-    }
-    return TextSpan(style: style, children: children);
-  }
-}
+import 'bb_text_formatter.dart';
 
 class StaffWorkspaceScreen extends StatefulWidget {
   const StaffWorkspaceScreen({Key? key}) : super(key: key);
@@ -68,20 +24,19 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
   late VividEditingController _publicPostController;
   late VividEditingController _internalNoticeController;
 
-  // 🎯 DROPDOWN STRINGS
   String? _selectedEventType;
   String? _selectedSundayService;
   String? _selectedMidweekCategory;
 
-  // 📡 COMBINED LEDGER STATE (Aggregates posts and notices)
   List<dynamic> _sentHistory = [];
   bool _isLoadingHistory = true;
 
-  // 🔄 UI SPINNER STATES TO LOCK CLICKS
   bool _isSubmittingPost = false;
   bool _isSubmittingNotice = false;
 
-  // 📂 FILE PICKING STATE
+  bool _isLoading = false;
+ List<dynamic> _noticesLog = [];
+
   File? _selectedPostFile;
   String _fileTypeSelection = "TEXT";
 
@@ -113,56 +68,51 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
       print("🚨 File Pick Error: $e");
     }
   }
-  String _stripFormattingTags(String input) {
-    return input.replaceAll(RegExp(r'\[\/?([brg])\]'), '');
-  }
 
-  // Helper formatting prompt modal so users don't code tags manually
-  void _openStyleInsertionDialog(TextEditingController controller, String tagCode, String colorName, Color themeColor) {
-    final TextEditingController phraseController = TextEditingController();
+  void _applyStyleAtCursor(TextEditingController controller, String tagCode) {
+    final text = controller.text;
+    final selection = controller.selection;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text('Insert $colorName Text', style: TextStyle(color: themeColor, fontWeight: FontWeight.bold, fontSize: 16)),
-        content: TextField(
-          controller: phraseController,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: 'Type your styled phrase here...',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          ),
+    final textBefore = text.substring(0, start);
+    final lastOpen = textBefore.lastIndexOf('[$tagCode]');
+    final lastClose = textBefore.lastIndexOf('[/$tagCode]');
+
+    if (lastOpen > lastClose) {
+      final formatted = '[/$tagCode]';
+      controller.value = controller.value.copyWith(
+        text: text.replaceRange(start, end, formatted),
+        selection: TextSelection.collapsed(offset: start + formatted.length),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Color mode deactivated.'), duration: Duration(milliseconds: 700)),
+      );
+      return;
+    }
+
+    if (start != end) {
+       final selectedText = text.substring(start, end);
+      final formatted = '[$tagCode]$selectedText[/$tagCode]';
+      controller.value = controller.value.copyWith(
+        text: text.replaceRange(start, end, formatted),
+        selection: TextSelection.collapsed(offset: start + formatted.length),
+      );
+    } else {
+      final formatted = '[$tagCode]';
+      controller.value = controller.value.copyWith(
+        text: text.replaceRange(start, end, formatted),
+        selection: TextSelection.collapsed(offset: start + formatted.length),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Typing in ${tagCode == 'b' ? 'Blue' : tagCode == 'r' ? 'Red' : 'Green'} mode activated.'),
+          duration: const Duration(milliseconds: 700),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: themeColor, foregroundColor: Colors.white),
-            onPressed: () {
-              final textToInsert = phraseController.text.trim();
-              if (textToInsert.isNotEmpty) {
-                final currentText = controller.text;
-                final selection = controller.selection;
-                final formatted = '[$tagCode]$textToInsert[/$tagCode]';
-
-                int insertPos = selection.isValid ? selection.start : currentText.length;
-                final newText = currentText.replaceRange(insertPos, selection.isValid ? selection.end : insertPos, formatted);
-
-                controller.value = TextEditingValue(
-                  text: newText,
-                  selection: TextSelection.collapsed(offset: insertPos + formatted.length),
-                );
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('Insert'),
-          )
-        ],
-      ),
-    );
+      );
+    }
   }
 
-  //  SIMPLE TOUCH VISUAL FORMATTING RIBBON AT THE BOTTOM OF CONTAINER FIELD
   Widget _buildFormattingRibbon(TextEditingController controller) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
@@ -174,12 +124,12 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
       ),
       child: Row(
         children: [
-          const Text('Text Style:  ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-          _colorChip(label: 'Blue', color: const Color(0xFF0D47A1), onTap: () => _openStyleInsertionDialog(controller, 'b', 'Blue', const Color(0xFF0D47A1))),
+          const Text('Tap color to type in: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+          _colorChip(label: 'Blue', color: const Color(0xFF0D47A1), onTap: () => _applyStyleAtCursor(controller, 'b')),
           const SizedBox(width: 8),
-          _colorChip(label: 'Red', color: const Color(0xFFC62828), onTap: () => _openStyleInsertionDialog(controller, 'r', 'Red', const Color(0xFFC62828))),
+          _colorChip(label: 'Red', color: const Color(0xFFC62828), onTap: () => _applyStyleAtCursor(controller, 'r')),
           const SizedBox(width: 8),
-          _colorChip(label: 'Green', color: const Color(0xFF2E7D32), onTap: () => _openStyleInsertionDialog(controller, 'g', 'Green', const Color(0xFF2E7D32))),
+          _colorChip(label: 'Green', color: const Color(0xFF2E7D32), onTap: () => _applyStyleAtCursor(controller, 'g')),
         ],
       ),
     );
@@ -201,12 +151,11 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     );
   }
 
-  // 📡 FETCH RECENT SUBMISSIONS MATCHING EXCLUSIVELY SENDER IDENTITY
   Future<void> _fetchCombinedHistory() async {
     setState(() => _isLoadingHistory = true);
     final String? activeStaff = SessionManager.currentStaffId;
 
-    if (activeStaff == null) {
+    if (activeStaff == null || activeStaff.isEmpty || activeStaff == "null") {
       setState(() => _isLoadingHistory = false);
       return;
     }
@@ -240,7 +189,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
 
   Future<void> _deletePost(dynamic item) async {
     final String? activeStaff = SessionManager.currentStaffId;
-    if (activeStaff == null) return;
+    if (activeStaff == null || activeStaff.isEmpty || activeStaff == "null") return;
     final int postId = item['id'];
 
     bool confirmDelete = await showDialog<bool>(
@@ -292,8 +241,119 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     } catch (_) {}
   }
 
-  // 📝 EDIT/UPDATE DIALOG MODAL LAYOUT
-  void _showEditDialog(dynamic item) {
+  Future<void> _deleteNotice(dynamic item) async {
+    final int? noticeId = item['id'];
+    final String? activeStaff = SessionManager.currentStaffId;
+
+    if (noticeId == null || activeStaff == null) return;
+
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+     bool confirmDelete = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          backgroundColor: Theme.of(dialogContext).cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+              const SizedBox(width: 10),
+              Text(
+                'Confirm Deletion',
+                style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+              ),
+            ],
+          ),
+          content: Text(
+            'Are you sure you want to delete this notice? This action will permanently remove it from the mobile bulletin boards and cannot be undone.',
+            style: TextStyle(fontSize: 14, color: isDark ? Colors.white70 : Colors.grey.shade700),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'CANCEL',
+                style: TextStyle(color: isDark ? Colors.white70 : Colors.grey.shade600, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade800,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('DELETE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    ) ?? false;
+
+    if (!confirmDelete) return;
+
+     setState(() {
+      _isLoading = true;
+    });
+
+    final String deleteUrl = 'http://192.168.100.33:8080/api/v1/staff/delete-notice/$noticeId?senderId=$activeStaff';
+
+    try {
+      final response = await http.delete(Uri.parse(deleteUrl));
+
+      if (response.statusCode == 200) {
+        // 3. Update the UI state arrays seamlessly
+        setState(() {
+          _noticesLog.removeWhere((element) => element['id'] == noticeId);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🗑️ Notice permanently removed from church records.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      } else {
+        throw Exception("Server rejected action or permission denied.");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete notice: $e'),
+          backgroundColor: Colors.amber.shade900,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _showNoticeOptions(dynamic item) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+              title: const Text('Delete Staff Notice', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteNotice(item);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+   void _showEditDialog(dynamic item) {
     final TextEditingController titleEditController = TextEditingController(text: item['title']);
     final VividEditingController contentEditController = VividEditingController(context: context, text: item['content']);
     String? currentSubService = item['subService'] == "NONE" ? null : item['subService'];
@@ -312,7 +372,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
 
             Future<void> executeUpdate({required bool shouldBroadcast}) async {
               final String? activeStaff = SessionManager.currentStaffId;
-              if (activeStaff == null) {
+              if (activeStaff == null || activeStaff.isEmpty || activeStaff == "null") {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Session expired. Log in again.'), backgroundColor: Colors.red));
                 return;
               }
@@ -456,7 +516,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     }
 
     final String? activeStaff = SessionManager.currentStaffId;
-    if (activeStaff == null) {
+    if (activeStaff == null || activeStaff.isEmpty || activeStaff == "null") {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⚠️ Session Error: Staff identity not found. Please log in again.'), backgroundColor: Colors.red),
       );
@@ -471,10 +531,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
 
       request.fields['postType'] = _selectedEventType!;
       request.fields['subService'] = _selectedSundayService ?? "NONE";
-
-
       request.fields['midweekCategory'] = _selectedMidweekCategory ?? "NONE";
-
       request.fields['title'] = _publicTitleController.text.trim();
       request.fields['content'] = _publicPostController.text.trim();
       request.fields['senderId'] = activeStaff;
@@ -489,11 +546,8 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
         );
       }
 
-      print("📡 Dispatching Multipart Post Request to: $uri");
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
-
-      print("📡 Server Response: ${response.statusCode} - ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (mounted) {
@@ -503,10 +557,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
           setState(() {
             _selectedEventType = null;
             _selectedSundayService = null;
-
-            // 🟩 RESET FORM STATE: Clear state tracker on successful upload
             _selectedMidweekCategory = null;
-
             _selectedPostFile = null;
             _fileTypeSelection = "TEXT";
           });
@@ -519,7 +570,6 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
         }
       }
     } catch (e) {
-      print("🚨 POST Exception: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Network error dispatching payload.'), backgroundColor: Colors.red));
       }
@@ -535,7 +585,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     }
 
     final String? activeStaff = SessionManager.currentStaffId;
-    if (activeStaff == null) {
+    if (activeStaff == null || activeStaff.isEmpty || activeStaff == "null") {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⚠️ Session Error: Staff identity not found.'), backgroundColor: Colors.red),
       );
@@ -550,14 +600,11 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     };
 
     try {
-      print("📡 Dispatching Notice Payload: ${jsonEncode(payload)}");
       final response = await http.post(
         Uri.parse('$baseUrl/staff/create-notice'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode(payload),
       );
-
-      print("📡 Notice Response: ${response.statusCode} - ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (mounted) {
@@ -572,7 +619,6 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
         }
       }
     } catch (e) {
-      print("🚨 NOTICE Exception: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Network error dispatching notice.'), backgroundColor: Colors.red));
       }
@@ -588,13 +634,52 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     _internalNoticeController.dispose();
     super.dispose();
   }
-
   Future<void> _handleLogout() async {
-    await NotificationService().unsubscribeFromStaffUpdates();
-    await SessionManager.clearStaffSession();
+    showDialog(
+      context: context,
+      barrierDismissible: false, 
+      builder: (BuildContext dialogContext) {
+        return PopScope(
+          canPop: false, 
+          child: AlertDialog(
+            backgroundColor: Theme.of(context).cardColor,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            content: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.redAccent),
+                  ),
+                  SizedBox(height: 24),
+                  Text(
+                    "Opting out...",
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    await Future.wait([
+      NotificationService().unsubscribeFromStaffUpdates(),
+      SessionManager.clearStaffSession(),
+      Future.delayed(const Duration(seconds: 3)),
+    ]);
+
     if (!mounted) return;
-    Navigator.of(context).pop();
+     Navigator.of(context).pop();
+     Navigator.of(context).pop();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -639,14 +724,13 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
       ),
     );
   }
-// ==================== 🟥 TAB 1: PUBLIC POST VIEW ====================
+
   Widget _buildPostTab(bool isDark, Color primaryColor) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 🟩 Row layout to sandwich the "Add Service URL" button right beside the description text
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -656,22 +740,66 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey),
                 ),
               ),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: primaryColor,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                icon: const Icon(Icons.video_call_rounded, size: 20),
-                label: const Text('Add Service URL', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ShareServiceLinkPage(primaryColor: primaryColor),
-                    ),
-                  );
+              // 🟩 SWAPPED OUT TEXT BUTTON FOR POPUP MENU BUTTON
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'service_url') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ShareServiceLinkPage(primaryColor: primaryColor),
+                      ),
+                    );
+                  } else if (value == 'project_track') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ProjectTrackScreen(),
+                      ),
+                    );
+                  }
                 },
+                itemBuilder: (BuildContext context) => [
+                  PopupMenuItem<String>(
+                    value: 'service_url',
+                    child: Row(
+                      children: [
+                        Icon(Icons.video_call_rounded, color: primaryColor, size: 20),
+                        const SizedBox(width: 8),
+                        const Text('Add Service URL', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'project_track',
+                    child: Row(
+                      children: [
+                        Icon(Icons.analytics_outlined, color: primaryColor, size: 20),
+                        const SizedBox(width: 8),
+                        const Text('Project Tracking', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: primaryColor.withValues(alpha: 0.5)),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_circle_outline_rounded, size: 18, color: primaryColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Actions',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primaryColor),
+                      ),
+                      Icon(Icons.arrow_drop_down, size: 18, color: primaryColor),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -690,18 +818,16 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
             onChanged: _isSubmittingPost ? null : (value) {
               setState(() {
                 _selectedEventType = value;
-                // Clean up opposing state flags so fields don't bleed hidden values
                 if (value != 'SUNDAY_SERVICE') _selectedSundayService = null;
                 if (value != 'MIDWEEK_EVENT') _selectedMidweekCategory = null;
               });
             },
           ),
 
-          // ⛪ CONDITIONAL BLOCK: Sunday Service Sub-Services
           if (_selectedEventType == 'SUNDAY_SERVICE') ...[
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _selectedSundayService, // Changed from initialValue to value for safe state clearing
+              value: _selectedSundayService,
               hint: const Text('Select Sub Service'),
               decoration: _buildInputDecoration(isDark, Icons.church_outlined),
               items: ['Kikuyu Service', 'Kiswahili Service', 'English Service', 'Main Kikuyu Service']
@@ -711,7 +837,6 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
             ),
           ],
 
-          // 📅 CONDITIONAL BLOCK: Mid-Week Event Sub-Categories
           if (_selectedEventType == 'MIDWEEK_EVENT') ...[
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -830,9 +955,9 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Expanded(
                 child: Text(
@@ -841,36 +966,66 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const ChurchSchedulesScreen()),
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: primaryColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: primaryColor.withValues(alpha: 0.3), width: 1),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.calendar_month_rounded, size: 16, color: primaryColor),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Schedules',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: primaryColor,
-                        ),
+
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert_rounded, color: primaryColor, size: 26),
+                tooltip: 'Staff Actions Menu',
+                onSelected: (value) {
+                  if (value == 'schedules') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const ChurchSchedulesScreen()),
+                    );
+                  } else if (value == 'themes') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ThemesScreen(primaryColor: primaryColor),
                       ),
-                    ],
+                    );
+                  } else if (value == 'reports') {
+                     Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => AdminReportsScreen(adminMemberId: SessionManager.currentStaffId)),
+                    );
+                  }
+                },
+                itemBuilder: (BuildContext context) => [
+                  PopupMenuItem<String>(
+                    value: 'schedules',
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_month_rounded, size: 18, color: primaryColor),
+                        const SizedBox(width: 10),
+                        const Text('Schedules', style: TextStyle(fontSize: 14)),
+                      ],
+                    ),
                   ),
-                ),
+                  PopupMenuItem<String>(
+                    value: 'themes',
+                    child: Row(
+                      children: [
+                        Icon(Icons.auto_awesome_outlined, size: 18, color: primaryColor),
+                        const SizedBox(width: 10),
+                        const Text('Themes', style: TextStyle(fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  PopupMenuItem<String>(
+                    value: 'reports',
+                    child: Row(
+                      children: [
+                        Icon(Icons.gavel_rounded, size: 18, color: Colors.redAccent.shade700),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Reported Posts',
+                          style: TextStyle(fontSize: 14, color: Colors.redAccent.shade700, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -916,9 +1071,7 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
     );
   }
 
-  // ==================== 🟦 TAB 3: HISTORICAL SENT LEDGER ====================
   Widget _buildSentTab(bool isDark, Color primaryColor) {
-    print("MASTER PAYLOAD: $_sentHistory");
     if (_isLoadingHistory) return const Center(child: CircularProgressIndicator());
     if (_sentHistory.isEmpty) return const Center(child: Text('No messages sent via this channel yet.'));
 
@@ -931,60 +1084,70 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
           final item = _sentHistory[index];
           final bool isNotice = item['ledgerType'] == 'NOTICE';
 
-          return Card(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${index + 1}. Item ID: #${item['id']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blueGrey)),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: isNotice ? Colors.deepOrange.withValues(alpha: 0.1) : primaryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-                            child: Text(isNotice ? 'STAFF NOTICE' : item['postType'].toString().replaceAll('_', ' '), style: TextStyle(color: isNotice ? Colors.deepOrange : primaryColor, fontSize: 11, fontWeight: FontWeight.bold)),
-                          ),
-                          if (!isNotice)
-                            PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert_rounded, size: 20),
-                              onSelected: (action) {
-                                if (action == 'edit') { _showEditDialog(item); }
-                                else if (action == 'delete') { _deletePost(item); }
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_rounded, color: Colors.blue, size: 18), SizedBox(width: 8), Text('Edit Post')])),
-                                const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18), SizedBox(width: 8), Text('Delete')])),
-                              ],
+          return GestureDetector(
+            onLongPress: () {
+               if (isNotice) {
+                  _showNoticeOptions(item);
+               }
+            },
+            child: Card(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${index + 1}'),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(color: isNotice ? Colors.deepOrange.withValues(alpha: 0.1) : primaryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                              child: Text(isNotice ? 'STAFF NOTICE' : item['postType'].toString().replaceAll('_', ' '), style: TextStyle(color: isNotice ? Colors.deepOrange : primaryColor, fontSize: 11, fontWeight: FontWeight.bold)),
                             ),
-                        ],
-                      ),
+                            if (!isNotice)
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert_rounded, size: 20),
+                                onSelected: (action) {
+                                  if (action == 'edit') { _showEditDialog(item); }
+                                  else if (action == 'delete') { _deletePost(item); }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_rounded, color: Colors.blue, size: 18), SizedBox(width: 8), Text('Edit Post')])),
+                                  const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18), SizedBox(width: 8), Text('Delete')])),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (item['subService'] != null && item['subService'] != "NONE") ...[
+                      const SizedBox(height: 4),
+                      Text('⛪ ${item['subService']}', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.blueGrey, fontSize: 13)),
                     ],
-                  ),
-                  if (item['subService'] != null && item['subService'] != "NONE") ...[
+                    const SizedBox(height: 8),
+                    Text(item['title'] ?? 'Internal Staff Update', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                     const SizedBox(height: 4),
-                    Text('⛪ ${item['subService']}', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.blueGrey, fontSize: 13)),
+                    BBText(
+                      text: item['content'] ?? '',
+                      charLimit: 40,
+                    ),
+                    const Divider(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('🕒 ${item['formattedTime'] ?? 'Now'} | 📅 ${item['formattedDate'] ?? 'Today'}', style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
+                        const Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 16),
+                      ],
+                    )
                   ],
-                  const SizedBox(height: 8),
-                  Text(item['title'] ?? 'Internal Staff Update', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  const SizedBox(height: 4),
-                  BBTextFormatter.parseToRichText(context, item['content'] ?? ''),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('🕒 ${item['formattedTime'] ?? 'Now'} | 📅 ${item['formattedDate'] ?? 'Today'}', style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
-                      const Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 16),
-                    ],
-                  )
-                ],
+                ),
               ),
             ),
           );
@@ -998,35 +1161,4 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
   }
 }
 
-class BBTextFormatter {
-  static Widget parseToRichText(BuildContext context, String input, {double fontSize = 13.0, double height = 1.3}) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color defaultColor = isDark ? Colors.white70 : Colors.black87;
-    final Color blueColor = isDark ? Colors.lightBlueAccent : const Color(0xFF0D47A1);
-    final Color redColor = isDark ? Colors.redAccent : const Color(0xFFC62828);
-    final Color greenColor = isDark ? Colors.greenAccent : const Color(0xFF2E7D32);
 
-    final List<TextSpan> spans = [];
-     RegExp regExp = RegExp(r'\[([brg])\](.*?)\[\/\1\]|([^\[]+)', dotAll: true);
-   // final RegExp regExp = RegExp(r'<(b)>(.*?)</\1>|([^<]+)', dotAll: true);
-    final Iterable<Match> matches = regExp.allMatches(input);
-
-    for (final Match match in matches) {
-      if (match.group(3) != null) {
-        spans.add(TextSpan(text: match.group(3), style: TextStyle(color: defaultColor, fontSize: fontSize, height: height)));
-      } else {
-        final String? tag = match.group(1);
-        final String textContent = match.group(2) ?? '';
-        Color targetColor = defaultColor;
-        FontWeight weight = FontWeight.normal;
-
-        if (tag == 'b') { targetColor = blueColor; weight = FontWeight.bold; }
-        else if (tag == 'r') { targetColor = redColor; weight = FontWeight.bold; }
-        else if (tag == 'g') { targetColor = greenColor; weight = FontWeight.bold; }
-
-        spans.add(TextSpan(text: textContent, style: TextStyle(color: targetColor, fontWeight: weight, fontSize: fontSize, height: height)));
-      }
-    }
-    return RichText(text: TextSpan(children: spans));
-  }
-}

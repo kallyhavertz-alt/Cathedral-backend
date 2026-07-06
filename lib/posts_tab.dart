@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:untitled/report_post.dart';
+import 'package:untitled/session_manager.dart';
 import 'community_models.dart';
+import 'deep_link_service.dart';
 import 'feed_video_preview.dart';
+import 'bb_text_formatter.dart';
+import 'file_download_service.dart';
 
 class PostsTab extends StatefulWidget {
   final List<MemberPostModel> initialFeed;
@@ -173,181 +179,232 @@ class _PostsTabState extends State<PostsTab> {
               itemCount: filteredFeed.length,
               itemBuilder: (context, index) {
                 final post = filteredFeed[index];
-                final String? serverUrl = post.mediaUrl;
-                final String? avatarUrl = post.memberProfilePicUrl;
 
-                // Build full safe resource endpoint tracking URI
-                final String fullMediaUrl = serverUrl == null ? '' : (serverUrl.startsWith('http')
-                    ? serverUrl
-                    : 'http://192.168.100.33:8080${serverUrl.startsWith('/') ? '' : '/'}$serverUrl');
 
-                final String fullAvatarUrl = avatarUrl == null || avatarUrl.isEmpty ? '' : (avatarUrl.startsWith('http')
-                    ? avatarUrl
-                    : 'http://192.168.100.33:8080${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl');
-
-                return Card(
-                  color: Theme.of(context).cardColor,
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  elevation: 1.5,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Top profile row header
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 20,
-                              backgroundColor: isDark ? Colors.blueGrey[700] : Colors.blueGrey[100],
-                              backgroundImage: fullAvatarUrl.isNotEmpty
-                                  ? NetworkImage(fullAvatarUrl)
-                                  : null,
-                              child: (avatarUrl == null || avatarUrl.isEmpty)
-                                  ? Text(
-                                post.memberName.isNotEmpty ? post.memberName[0].toUpperCase() : 'C',
-                                style: TextStyle(color: isDark ? Colors.white : Colors.blueGrey[800], fontWeight: FontWeight.bold),
-                              )
-                                  : null,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(post.memberName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: mainTextColor)),
-                                  Text(post.createdAtStr, style: TextStyle(color: subTextColor, fontSize: 11)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-
-                        // Post Caption
-                        if (post.caption.isNotEmpty) ...[
-                          Text(post.caption, style: TextStyle(fontSize: 14, color: mainTextColor)),
-                          const SizedBox(height: 10),
-                        ],
-
-                        // 🟩 SMART MEDIA BLOCK SYSTEM: Diverges paths based on file string signatures
-                        if (serverUrl != null && serverUrl.isNotEmpty) ...[
-                          if (post.mediaType == 'VIDEO') ...[
-                            // 🎥 VIDEO MEDIA CONTAINER ROUTE
-                            Container(
-                              height: 200,
-                              width: double.infinity,
-                              clipBehavior: Clip.antiAlias,
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                              ),
-                              child: Stack(
-                                children: [
-                                  FeedVideoPreview(videoUrl: fullMediaUrl),
-                                  Positioned(
-                                    bottom: 8,
-                                    left: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.6),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Row(
-                                        children: [
-                                          Icon(Icons.videocam, color: Colors.redAccent, size: 12),
-                                          SizedBox(width: 4),
-                                          Text("Shorts", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ] else ...[
-                            // 📷 STANDARD IMAGE MEDIA CONTAINER ROUTE
-                            Container(
-                              height: 200,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: Image.network(
-                                fullMediaUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Center(
-                                  child: Icon(Icons.broken_image_outlined, color: subTextColor, size: 24),
-                                ),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                        ],
-
-                        // Interactive Action Row Footer (Like, Share, Comment)
-                        const Divider(height: 1),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: [
-                              InkWell(
-                                onTap: () => widget.onLikeToggle(post.id),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      post.isLikedByMe ? Icons.favorite : Icons.favorite_border,
-                                      color: post.isLikedByMe ? Colors.red : subTextColor,
-                                      size: 22,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text('${post.likesCount}', style: TextStyle(fontSize: 13, color: subTextColor, fontWeight: FontWeight.w500)),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 25),
-                              InkWell(
-                                onTap: () => _openCommentBottomSheet(context, post),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.chat_bubble_outline, color: subTextColor, size: 21),
-                                    const SizedBox(width: 5),
-                                    Text('${post.commentsCount}', style: TextStyle(fontSize: 13, color: subTextColor, fontWeight: FontWeight.w500)),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 25),
-                              InkWell(
-                                onTap: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Sharing fellowship post...'), duration: Duration(seconds: 1)),
-                                  );
-                                },
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.share_outlined, color: subTextColor, size: 21),
-                                    const SizedBox(width: 5),
-                                    Text('Share', style: TextStyle(fontSize: 13, color: subTextColor, fontWeight: FontWeight.w500)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
+                return CommunityPostCard(
+                  post: post,
+                  isAdminPreview: false,
+                  onLikeToggle: (id) => widget.onLikeToggle(id),
+                  onCommentTap: () => _openCommentBottomSheet(context, post),
                 );
               },
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+
+class CommunityPostCard extends StatelessWidget {
+  final dynamic post; // Pass your MemberPost DTO map or class model here
+  final bool isAdminPreview;
+  final Function(int)? onLikeToggle;
+  final VoidCallback? onCommentTap;
+
+  const CommunityPostCard({
+    Key? key,
+    required this.post,
+    this.isAdminPreview = false,
+    this.onLikeToggle,
+    this.onCommentTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color mainTextColor = isDark ? Colors.white : Colors.black87;
+    final Color subTextColor = isDark ? Colors.white60 : Colors.grey;
+
+    final String? serverUrl = post is Map ? post['mediaUrl'] : post.mediaUrl;
+    final String? avatarUrl = post is Map ? post['memberProfilePicUrl'] : post.memberProfilePicUrl;
+    final String memberName = post is Map ? (post['memberName'] ?? 'Unknown') : post.memberName;
+    final String createdAtStr = post is Map ? (post['createdAtStr'] ?? '') : post.createdAtStr;
+    final String caption = post is Map ? (post['caption'] ?? '') : post.caption;
+    final String mediaType = post is Map ? (post['mediaType'] ?? 'IMAGE') : post.mediaType;
+    final bool isLikedByMe = post is Map ? (post['isLikedByMe'] ?? false) : post.isLikedByMe;
+    final int likesCount = post is Map ? (post['likesCount'] ?? 0) : post.likesCount;
+    final int commentsCount = post is Map ? (post['commentsCount'] ?? 0) : post.commentsCount;
+    final int postId = post is Map ? (post['id'] ?? 0) : post.id;
+
+    // Build resource endpoints
+    final String fullMediaUrl = serverUrl == null ? '' : (serverUrl.startsWith('http')
+        ? serverUrl
+        : 'http://192.168.100.33:8080${serverUrl.startsWith('/') ? '' : '/'}$serverUrl');
+
+    final String fullAvatarUrl = avatarUrl == null || avatarUrl.isEmpty ? '' : (avatarUrl.startsWith('http')
+        ? avatarUrl
+        : 'http://192.168.100.33:8080${avatarUrl.startsWith('/') ? '' : '/'}$avatarUrl');
+
+    return Card(
+      color: Theme.of(context).cardColor,
+      margin: isAdminPreview ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: isAdminPreview ? 0 : 1.5,
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isDark ? Colors.blueGrey[700] : Colors.blueGrey[100],
+                  backgroundImage: fullAvatarUrl.isNotEmpty ? NetworkImage(fullAvatarUrl) : null,
+                  child: (avatarUrl == null || avatarUrl.isEmpty)
+                      ? Text(
+                    memberName.isNotEmpty ? memberName[0].toUpperCase() : 'C',
+                    style: TextStyle(color: isDark ? Colors.white : Colors.blueGrey[800], fontWeight: FontWeight.bold),
+                  )
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(memberName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: mainTextColor)),
+                      Text(createdAtStr, style: TextStyle(color: subTextColor, fontSize: 11)),
+                    ],
+                  ),
+                ),
+
+                // Hide popup options if we are just previewing inside the admin panel
+                if (!isAdminPreview)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, color: subTextColor),
+                    onSelected: (value) {
+                      if (value == 'report') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ReportPostScreen(
+                              postId: postId.toString(),
+                              postAuthor: memberName,
+                              reportingMemberId: SessionManager.currentUserId,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem<String>(
+                        value: 'report',
+                        child: Row(
+                          children: [
+                            Icon(Icons.report_problem_outlined, color: Colors.redAccent, size: 20),
+                            SizedBox(width: 10),
+                            Text('Report Content', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Post Caption
+            if (caption.isNotEmpty) ...[
+              Text(caption, style: TextStyle(color: mainTextColor, fontSize: 14)), // Fallback or use BBText
+              const SizedBox(height: 10),
+            ],
+
+            // Media Assets Route
+            if (serverUrl != null && serverUrl.isNotEmpty) ...[
+              if (mediaType == 'VIDEO') ...[
+                Container(
+                  height: 200,
+                  width: double.infinity,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Stack(
+                    children: [
+                      FeedVideoPreview(videoUrl: fullMediaUrl),
+                      Positioned(
+                        bottom: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.videocam, color: Colors.redAccent, size: 12),
+                              const SizedBox(width: 4),
+                              Text("Shorts", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Container(
+                  height: 200,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.network(
+                    fullMediaUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Center(
+                      child: Icon(Icons.broken_image_outlined, color: subTextColor, size: 24),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+            ],
+
+            // Action Footer (Like, Comment, Share) - Hidden or Disabled in admin mode
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.only(top: 10.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  InkWell(
+                    onTap: isAdminPreview ? null : () => onLikeToggle?.call(postId),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isLikedByMe ? Icons.favorite : Icons.favorite_border,
+                          color: isLikedByMe ? Colors.red : subTextColor,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 5),
+                        Text('$likesCount', style: TextStyle(fontSize: 13, color: subTextColor, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 25),
+                  InkWell(
+                    onTap: isAdminPreview ? null : onCommentTap,
+                    child: Row(
+                      children: [
+                        Icon(Icons.chat_bubble_outline, color: subTextColor, size: 21),
+                        const SizedBox(width: 5),
+                        Text('$commentsCount', style: TextStyle(fontSize: 13, color: subTextColor, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          ],
+        ),
+      ),
     );
   }
 }

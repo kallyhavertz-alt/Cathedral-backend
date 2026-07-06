@@ -27,6 +27,14 @@ class _CreatePostModalState extends State<CreatePostModal> {
   final ImagePicker _picker = ImagePicker();
 
   @override
+  void initState() {
+    super.initState();
+    _captionController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   void dispose() {
     _captionController.dispose();
     super.dispose();
@@ -212,7 +220,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
                 ),
               ],
             ),
-            if (_selectedFile != null) ...[
+            if (_captionController.text.trim().isNotEmpty || _selectedFile != null) ...[
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -270,6 +278,14 @@ class _LocalVideoPreviewState extends State<LocalVideoPreview> {
       });
   }
 
+  /*@override
+  void initState() {
+    super.initState();
+    _captionController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }*/
+
   @override
   void dispose() {
     _controller.dispose();
@@ -286,7 +302,7 @@ class _LocalVideoPreviewState extends State<LocalVideoPreview> {
 
     return SizedBox.expand(
       child: FittedBox(
-        fit: BoxFit.cover,
+        fit: BoxFit.contain,
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
           width: _controller.value.size.width,

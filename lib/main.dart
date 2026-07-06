@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:untitled/deep_link_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:http/http.dart' as http;
@@ -17,6 +17,7 @@ import 'package:untitled/profile_screen.dart';
 import 'package:untitled/notes_screen.dart';
 import 'package:untitled/session_manager.dart';
 import 'package:untitled/cathedral_project_screen.dart';
+import 'package:untitled/bb_text_formatter.dart';
 
 import 'announcements_sreen.dart';
 import 'bishop_schedule_screen.dart';
@@ -78,28 +79,41 @@ void main() async {
       String? alertBody;
       String categoryType = 'GENERAL';
 
+      String createdAtTimeStr = DateTime.now().toIso8601String();
+
       if (message.notification != null) {
         alertTitle = message.notification!.title;
         alertBody = message.notification!.body;
       }
 
-      if (message.data.isNotEmpty) {
+       if (message.data.isNotEmpty) {
         print('📦 Extracting fields from silent Data Payload parameters...');
         alertTitle ??= message.data['title'];
         alertBody ??= message.data['body'];
 
-        if (message.data.containsKey('category_type') && message.data['category_type'] != null) {
-          categoryType = message.data['category_type'].toString().trim().toUpperCase();
+        // 🛡️ Robust key extraction from payload to prevent 'GENERAL' fallback
+        final String? rawCategory = message.data['category_type'] ?? 
+                                    message.data['categoryType'] ?? 
+                                    message.data['postType'] ?? 
+                                    message.data['type'];
+                                    
+        if (rawCategory != null) {
+          categoryType = rawCategory.toString().trim().toUpperCase();
         }
-        print("messagedata parsing complete: ${message.data}");
+
+        print("messagedata parsing complete: ${message.data} | Extracted Category: $categoryType");
+      }
+      if (message.data.containsKey('created_at') && message.data['created_at'] != null) {
+        createdAtTimeStr = message.data['created_at'].toString();
       }
 
       print("📥 Pushing cleanly extracted parameters to Hub: [Category: $categoryType]");
+      print(message.data);
 
       alertTitle ??= 'ACK Cathedral Update';
       alertBody ??= 'Click to see what is happening today.';
 
-      NotificationHub.instance.receiveForegroundNotification(alertTitle, alertBody, categoryType);
+      NotificationHub.instance.receiveForegroundNotification(alertTitle, alertBody, categoryType, createdAtTimeStr);
 
 
       final overlayState = navigatorKey.currentState?.overlay;
@@ -211,7 +225,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadNavbarAvatar();
     _fetchNavBarAvatarFromServer();
-  }
+WidgetsBinding.instance.addPostFrameCallback((_) {
+DeepLinkService().initDeepLinks(context);
+  });
+    }
 
   Future<void> _fetchNavBarAvatarFromServer() async {
     try {
@@ -345,6 +362,27 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
     );
   }
 
+  String _formatNotificationTime(String? isoString) {
+    if (isoString == null || isoString.isEmpty) return "";
+    try {
+      final DateTime notificationDate = DateTime.parse(isoString).toLocal();
+      final DateTime now = DateTime.now();
+      final Duration difference = now.difference(notificationDate);
+
+      if (difference.inMinutes < 1) {
+        return "Just now";
+      } else if (difference.inMinutes < 60) {
+        return "${difference.inMinutes}m ago";
+      } else if (difference.inHours < 24) {
+        return "${difference.inHours}h ago";
+      } else {
+         return "${notificationDate.day}/${notificationDate.month}/${notificationDate.year}";
+      }
+    } catch (e) {
+      return "";
+    }
+  }
+
   void _showNotificationHistorySheet(BuildContext context) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -397,7 +435,8 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
                         itemBuilder: (context, index) {
                           final alert = notifications[index];
 
-                          final String category = alert['category_type'] ?? 'GENERAL';
+                          // Note: Ensuring you pull whatever key your NotificationHub passes down
+                          final String category = alert['updateType'] ?? alert['category_type'] ?? 'GENERAL';
                           final bool isEaglesLink = category == 'EAGLES_LINK';
 
                           return Container(
@@ -440,20 +479,43 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        alert['title'] ?? 'ACK Cathedral Update',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                          color: isEaglesLink
-                                              ? (isDark ? Colors.blue.shade300 : const Color(0xFF0D47A1))
-                                              : (isDark ? Colors.white70: Colors.black87),
-                                        ),
+                                      // 🟩 A Row layout to balance Title on the left and Timestamp on the right
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              alert['title'] ?? 'ACK Cathedral Update',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: isEaglesLink
+                                                    ? (isDark ? Colors.blue.shade300 : const Color(0xFF0D47A1))
+                                                    : (isDark ? Colors.white70 : Colors.black87),
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          // 🕒 THE NEW TIMESTAMP INJECTOR
+                                          Text(
+                                            _formatNotificationTime(alert['created_at']),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w400,
+                                              color: isDark ? Colors.white38 : Colors.grey.shade500,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 4),
-                                      Text(
-                                        alert['body'] ?? '',
-                                        style: TextStyle(fontSize: 13, color: isDark ? Colors.white60 : Colors.grey.shade700),
+                                      BBText(
+                                        text: alert['body'] ?? '',
+                                        charLimit: 40,
+                                        fontSize: 13,
+                                        color: isDark ? Colors.white60 : Colors.grey.shade700,
                                       ),
                                     ],
                                   ),
@@ -474,26 +536,36 @@ class _EventsTabBarViewState extends State<EventsTabBarView> {
     );
   }
 
-  String _determineCategoryThumbnail(String categoryType) {
+  String _determineCategoryThumbnail(String? categoryType) {
     print("🎨 UI Image Router received category string: '$categoryType'");
-    switch (categoryType.toUpperCase()) {
+
+    if (categoryType == null || categoryType.isEmpty) {
+      return 'assets/icons/default.png';
+    }
+
+    switch (categoryType.trim().toUpperCase()) {
       case 'SUNDAY_SERVICE':
       case 'SUNDAY_SERVICES':
-        return 'assets/icons/announce.png';
+        return 'assets/icons/dropped.png';
+
       case 'STAFF_NOTICE':
       case 'INTERNAL_STAFF_ALERT':
-        return 'assets/icons/bishop.png';
+        return 'assets/icons/staff_notice.png';
+
       case 'BISHOP_SPECIAL':
+      case 'PASTORAL_LETTER':
         return 'assets/icons/bishop.png';
-      case 'ANNOUNCEMENT':
-      case 'ANNOUNCEMENTS':
-        return 'assets/icons/default.png';
-      case 'EVENTS':
+
       case 'EVENT':
+      case 'EVENTS':
       case 'GENERALEVENT':
         return 'assets/icons/announce.png';
+
       case 'EAGLES_LINK':
         return 'assets/icons/eagles.jpg';
+
+      case 'ANNOUNCEMENT':
+      case 'ANNOUNCEMENTS':
       default:
         return 'assets/icons/default.png';
     }
@@ -765,6 +837,7 @@ class _TopPoppingBannerWidgetState extends State<_TopPoppingBannerWidget>
   @override
   void dispose() {
     _controller.dispose();
+    DeepLinkService().dispose();
     super.dispose();
   }
 

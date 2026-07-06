@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 class FullscreenVideoPlayer extends StatefulWidget {
@@ -21,7 +22,6 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     _initializePlayer();
   }
 
-  // 🟩 Helper method using your strict RegExp to catch all edge cases safely
   String? _extractVideoId(String url) {
     final RegExp regExp = RegExp(
       r'^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/|live\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*',
@@ -35,13 +35,10 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
         return id;
       }
     }
-
-    // Fallback to package's default utility method if RegExp missed it
     return YoutubePlayerController.convertUrlToId(url);
   }
 
   void _initializePlayer() {
-    // 🟩 Now using the bulletproof hybrid extraction method
     final String? videoId = _extractVideoId(widget.videoUrl);
 
     if (videoId != null && videoId.isNotEmpty) {
@@ -56,14 +53,19 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
         ),
       );
       setState(() => _isInitialized = true);
-    } else {
-      // Print this out to the debug console if the URL string is structurally broken
-      debugPrint("❌ Failed completely to parse YouTube ID from URL: ${widget.videoUrl}");
     }
+  }
+
+  Future<void> _resetOrientation() async {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
   }
 
   @override
   void dispose() {
+    _resetOrientation();
     if (_isInitialized) {
       _controller.close();
     }
@@ -72,29 +74,40 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          widget.title,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
+          await _resetOrientation();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Text(
+            widget.title,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () async {
+              await _resetOrientation();
+              if (mounted) Navigator.pop(context);
+            },
+          ),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+        body: Center(
+          child: _isInitialized
+              ? YoutubePlayer(
+            controller: _controller,
+            aspectRatio: 16 / 9,
+          )
+              : const CircularProgressIndicator(color: Colors.white),
         ),
-      ),
-      body: Center(
-        child: _isInitialized
-            ? YoutubePlayer(
-          controller: _controller,
-          aspectRatio: 16 / 9,
-        )
-            : const CircularProgressIndicator(color: Colors.white),
       ),
     );
   }

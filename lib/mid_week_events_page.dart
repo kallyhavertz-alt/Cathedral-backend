@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'event_details_screen.dart';
+import 'bb_text_formatter.dart';
+import 'file_download_service.dart';
 
 class MidWeekEventsPage extends StatefulWidget {
   const MidWeekEventsPage({Key? key}) : super(key: key);
@@ -20,10 +22,9 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
     'All events',
     'Daily prayers',
     'Wednesday holy communion',
-    'Friday Hymnos',
+    'Friday Hymnals',
     'Others'
   ];
-
   // 📡 Network Database Connection States
   List<dynamic> _liveEvents = [];
   bool _isLoading = true;
@@ -77,6 +78,29 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
     super.dispose();
   }
 
+  /// Helper logic to isolate and extract the first name from the sender ID string safely
+  String _getSenderFirstName(dynamic senderId) {
+    if (senderId == null || senderId.toString().trim().isEmpty) {
+      return "Staff";
+    }
+
+    String cleanId = senderId.toString().trim();
+
+    // If it's an email string, split before the domain boundary
+    if (cleanId.contains('@')) {
+      cleanId = cleanId.split('@')[0];
+    }
+
+    // Split by spaces or underscores to grab the first structural name segment
+    List<String> parts = cleanId.split(RegExp(r'[\s_.]'));
+    if (parts.isNotEmpty && parts[0].isNotEmpty) {
+      // Capitalize the first letter for a clean appearance
+      return parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
+    }
+
+    return "Staff";
+  }
+
   String _formatCategoryLabel(String? rawCategory) {
     if (rawCategory == null || rawCategory.toLowerCase() == 'null') {
       return 'Special Event';
@@ -124,7 +148,7 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
           matchesCategory = (rawCategory == 'WEDNESDAY_COMMUNION' || 
                              rawCategory == 'wednesday holy communion' ||
                              rawCategory == 'wednesday');
-        } else if (_selectedCategory == 'Friday Hymnos') {
+        } else if (_selectedCategory == 'Friday Hymnals') {
           matchesCategory = (rawCategory == 'FRIDAY_HYMNOS' || rawCategory == 'FRIDAY HYMNOS');
         } else if (_selectedCategory == 'Others') {
           matchesCategory = (rawCategory == 'NONE' || rawCategory == 'OTHERS');
@@ -231,18 +255,33 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
   }
 
   Widget _buildPicsumItemCard(Map<String, dynamic> item) {
-    final String postedBy = item['senderName'] ?? item['postedBy'] ?? 'Cathedral Admin';
+    final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
+
+    // 🔍 1. Identify if a valid server image url was fetched
+    String? fileUrl = item['fileUrl'];
+    String isFileType = item['isFileType'] ?? 'TEXT';
+    bool hasLiveImage = (isFileType == "IMAGE" && fileUrl != null && fileUrl.isNotEmpty);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
       height: 180,
       child: Stack(
         children: [
-          // Picsum background image layer
+          // 🖼️ DYNAMIC LIVE IMAGE / FALLBACK CANVAS BACKGROUND
           Positioned.fill(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.network(
+              child: hasLiveImage
+                  ? Image.network(
+                'http://192.168.100.33:8080$fileUrl', // Your local Spring Boot server asset port
+                fit: BoxFit.cover,
+                errorBuilder: (c, e, s) => Container(
+                  color: Colors.blueGrey,
+                  child: const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 40),
+                ),
+              )
+                  : Image.network(
+                // Fallback to Picsum seed only if it's a legacy TEXT post type with no image upload
                 'https://picsum.photos/seed/${item['id']}/600/300',
                 fit: BoxFit.cover,
                 errorBuilder: (c, e, s) => Container(color: Colors.blueGrey),
@@ -250,20 +289,19 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
             ),
           ),
 
-          // THE MULTI-DIRECTIONAL FADE GOGGLES
+          // 🏁 CONTRAST GRADIENT OVERLAY LAYER
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.85),
-                    Colors.black.withValues(alpha: 0.50),
-                    Colors.black.withValues(alpha: 0.85),
+                    Colors.transparent,
+                    // If it's a live upload image, we slightly deepen the gradient value for ultimate text legibility
+                    Colors.black.withValues(alpha: hasLiveImage ? 0.9 : 0.85)
                   ],
-                  stops: const [0.0, 0.5, 1.0],
                 ),
               ),
             ),
@@ -292,7 +330,7 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
             ),
           ),
 
-          // CARD CONTENT
+          // 📝 FOREGROUND CONTENT CONTAINER
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -313,22 +351,22 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        item['content'] ?? '',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.2),
+                      BBText(
+                        text: item['content'] ?? '',
+                        charLimit: 40,
+                        color: Colors.white70,
+                        fontSize: 13,
                       ),
                       const SizedBox(height: 8),
 
                       // POSTED BY:
                       Row(
                         children: [
-                          const Icon(Icons.person_outline_rounded, size: 12, color: Colors.greenAccent),
+                          const Icon(Icons.person_pin_circle_rounded, size: 14, color: Colors.blueAccent),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              'By: $postedBy',
+                              'Posted by: $uploaderName',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11, color: Colors.greenAccent, fontWeight: FontWeight.bold),
@@ -369,7 +407,6 @@ class _MidWeekEventsPageState extends State<MidWeekEventsPage> {
                   MaterialPageRoute(
                     builder: (context) => EventDetailsScreen(
                       eventData: item,
-                      eventItem: const {},
                     ),
                   ),
                 );

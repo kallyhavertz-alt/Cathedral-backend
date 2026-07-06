@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'event_details_screen.dart';
+import 'bb_text_formatter.dart';
+import 'file_download_service.dart';
 
 class AnnouncementsScreen extends StatefulWidget {
   const AnnouncementsScreen({Key? key}) : super(key: key);
@@ -60,6 +62,29 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Helper logic to isolate and extract the first name from the sender ID string safely
+  String _getSenderFirstName(dynamic senderId) {
+    if (senderId == null || senderId.toString().trim().isEmpty) {
+      return "Staff";
+    }
+
+    String cleanId = senderId.toString().trim();
+
+    // If it's an email string, split before the domain boundary
+    if (cleanId.contains('@')) {
+      cleanId = cleanId.split('@')[0];
+    }
+
+    // Split by spaces or underscores to grab the first structural name segment
+    List<String> parts = cleanId.split(RegExp(r'[\s_.]'));
+    if (parts.isNotEmpty && parts[0].isNotEmpty) {
+      // Capitalize the first letter for a clean appearance
+      return parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
+    }
+
+    return "Staff";
   }
 
   @override
@@ -151,18 +176,32 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
   }
 
   Widget _buildNoticeCardLayout(Map<String, dynamic> item) {
-    final String postedBy = item['senderName'] ?? item['postedBy'] ?? 'Cathedral Admin';
+    final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
+
+    // 🔍 1. Identify if a valid server image url was fetched
+    String? fileUrl = item['fileUrl'];
+    String isFileType = item['isFileType'] ?? 'TEXT';
+    bool hasLiveImage = (isFileType == "IMAGE" && fileUrl != null && fileUrl.isNotEmpty);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-      height: 165,
+      height: 180,
       child: Stack(
         children: [
-          //  BACKGROUND IMAGE
+          // 🖼️ DYNAMIC LIVE IMAGE / FALLBACK CANVAS BACKGROUND
           Positioned.fill(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.asset(
+              child: hasLiveImage
+                  ? Image.network(
+                'http://192.168.100.33:8080$fileUrl', // Your local Spring Boot server asset port
+                fit: BoxFit.cover,
+                errorBuilder: (c, e, s) => Container(
+                  color: Colors.blueGrey,
+                  child: const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 40),
+                ),
+              )
+                  : Image.asset(
                 'assets/icons/announce.png',
                 fit: BoxFit.cover,
                 alignment: Alignment.centerLeft,
@@ -171,66 +210,61 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
             ),
           ),
 
+          // 🏁 CONTRAST GRADIENT OVERLAY LAYER
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.85),
-                    Colors.black.withValues(alpha: 0.75),
-                    Colors.black.withValues(alpha: 0.90),
+                    Colors.transparent,
+                    // If it's a live upload image, we slightly deepen the gradient value for ultimate text legibility
+                    Colors.black.withValues(alpha: hasLiveImage ? 0.9 : 0.85)
                   ],
                 ),
               ),
             ),
           ),
 
-          // 📝 3. CARD CONTENTS (Text absolute left aligned + ACK logo pinned far right)
+          // 📝 FOREGROUND CONTENT CONTAINER
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
               children: [
-                // Column starts cleanly from absolute left now!
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Text(
                         item['title'].toString().toUpperCase(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
+                          color: Colors.redAccent,
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Colors.redAccent, // Red accent pops sharply on the dark background
+                          fontSize: 16,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        item['content'] ?? '',
-                        maxLines: 2, // Dropped to 2 lines to allocate perfect vertical space for sender identity
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          height: 1.3,
-                          color: Colors.white70,
-                        ),
+                      const SizedBox(height: 4),
+                      BBText(
+                        text: item['content'] ?? '',
+                        charLimit: 40,
+                        color: Colors.white,
+                        fontSize: 13,
                       ),
+                      const SizedBox(height: 8),
 
-                      const SizedBox(height: 10),
-
-                      // 👤 POSTED BY METADATA FOOTPRINT
+                      // POSTED BY:
                       Row(
                         children: [
-                          const Icon(Icons.person_outline_rounded, size: 12, color: Colors.amberAccent),
+                          const Icon(Icons.person_pin_circle_rounded, size: 14, color: Colors.amberAccent),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              'By: $postedBy',
+                              'Posted by: $uploaderName',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11, color: Colors.amberAccent, fontWeight: FontWeight.bold),
@@ -240,17 +274,15 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
                       ),
                       const SizedBox(height: 2),
 
-                      // 🕒 TIME & DATE METADATA FOOTPRINT
+                      // timestamp
                       Row(
                         children: [
                           const Icon(Icons.calendar_today, size: 11, color: Colors.blueGrey),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              'Sent: ${item['formattedDate'] ?? 'Today'} | 🕒 ${item['formattedTime'] ?? 'Now'}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: Colors.blueGrey, fontWeight: FontWeight.w600),
+                              '${item['formattedDate'] ?? 'Today'} | 🕒 ${item['formattedTime'] ?? 'Now'}',
+                              style: const TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.w500, fontSize: 11),
                             ),
                           ),
                         ],
@@ -258,40 +290,45 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
                     ],
                   ),
                 ),
-
-                const SizedBox(width: 12),
-
-
-                GestureDetector(
-                  onTap: () {
-
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => EventDetailsScreen( eventItem: {}, eventData: {},)),
-                  );
-
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white10,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1),
-                    ),
-                    child: ClipOval(
-                      child: Image.asset(
-                        'assets/icim/cathsign.jpg',
-                        width: 42,
-                        height: 42,
-                        fit: BoxFit.contain,
-                        errorBuilder: (c, e, s) => const Icon(Icons.notifications_active_outlined, color: Colors.redAccent, size: 26),
-                      ),
-                    ),
-                  ),
-                ),
+                const SizedBox(width: 56),
               ],
             ),
           ),
+
+          // Action navigation symbol
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => EventDetailsScreen(
+                      eventData: item,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                height: 44,
+                width: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white70, width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 3))
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/icim/cathsign.jpg',
+                    fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const Icon(Icons.notifications_active_outlined, color: Colors.redAccent),
+                  ),
+                ),
+              ),
+            ),
+          )
         ],
       ),
     );

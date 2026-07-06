@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'event_details_screen.dart';
+import 'package:share_plus/share_plus.dart';
+import 'file_download_service.dart';
+import 'bb_text_formatter.dart';
 
 class SundayServicesPage extends StatefulWidget {
   const SundayServicesPage({Key? key}) : super(key: key);
@@ -219,130 +222,6 @@ class _SundayServicesPageState extends State<SundayServicesPage> {
     );
   }
 
- /* Widget _buildPicsumItemCard(Map<String, dynamic> item) {
-    //final String uploaderName = _getSenderFirstName(item['fullName']);
-    final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      height: 180,
-      child: Stack(
-        children: [
-          // 🖼️ DYNAMIC PICSUM SEED BACKGROUND
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.network(
-              'https://picsum.photos/seed/${item['id']}/600/300',
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              errorBuilder: (c, e, s) => Container(color: Colors.blueGrey),
-            ),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                      color: Colors.redAccent.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(8)
-                  ),
-                  child: Text(
-                    item['subService'].toString().toUpperCase(),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  item['title'].toString().toUpperCase(),
-                  style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '📅 ${item['formattedDate']} | 🕒 ${item['formattedTime']}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13),
-                ),
-                const SizedBox(height: 4),
-
-                // 🎯 NEW: UPLOADER BRAND BADGE LINE
-                Row(
-                  children: [
-                    Icon(Icons.person_pin_circle_rounded, color: Colors.blue[300], size: 14),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Posted by: $uploaderName',
-                      style: TextStyle(
-                          color: Colors.blue[100],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                          letterSpacing: 0.5
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // FLOATING ACK LOGO DETECTOR
-          Positioned(
-            bottom: 12,
-            right: 12,
-            child: GestureDetector(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => EventDetailsScreen(
-                      eventData: item,
-                      eventItem: const {},
-                    ),
-                  ),
-                );
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Opening details for ${item['title']}...'),
-                    duration: const Duration(milliseconds: 500),
-                  ),
-                );
-              },
-              child: Container(
-                height: 44,
-                width: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 2))
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(22),
-                  child: Image.asset('assets/icim/cathsign.jpg', fit: BoxFit.cover),
-                ),
-              ),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  */
   Widget _buildPicsumItemCard(Map<String, dynamic> item) {
     print("DEBUG POST DATA: ${item.toString()}");
     final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
@@ -426,6 +305,13 @@ class _SundayServicesPageState extends State<SundayServicesPage> {
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13),
                 ),
                 const SizedBox(height: 4),
+                BBText(
+                  text: item['content'] ?? '',
+                  charLimit: 40,
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
+                const SizedBox(height: 4),
 
                 // 🎯 UPLOADER BRAND BADGE LINE
                 Row(
@@ -457,15 +343,7 @@ class _SundayServicesPageState extends State<SundayServicesPage> {
                   MaterialPageRoute(
                     builder: (context) => EventDetailsScreen(
                       eventData: item,
-                      eventItem: const {},
                     ),
-                  ),
-                );
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Opening details for ${item['title']}...'),
-                    duration: const Duration(milliseconds: 500),
                   ),
                 );
               },

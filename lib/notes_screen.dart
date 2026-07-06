@@ -92,7 +92,7 @@ class _NotesPageState extends State<NotesPage> {
   /// 📡 SILENT SENTINEL SYNC: Handles network calls quietly in the background
   Future<void> _silentBackgroundCloudRefresh() async {
     final int activeId = SessionManager.currentUserId;
-    final String dynamicFetchUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes/user/$activeId';
+    final String dynamicFetchUrl = 'http://192.168.100.33:8080/api/notes/user/$activeId';
 
     try {
       final url = Uri.parse(dynamicFetchUrl);
@@ -101,6 +101,10 @@ class _NotesPageState extends State<NotesPage> {
       if (response.statusCode == 200) {
         List<dynamic> networkNotes = jsonDecode(response.body);
         _isOfflineMode = false;
+
+        if (mounted) {
+          setState(() => _isOfflineMode = false);
+        }
 
         if (networkNotes.isNotEmpty) {
           await LocalDatabaseHelper.instance.refreshLocalCache(networkNotes);
@@ -147,7 +151,7 @@ class _NotesPageState extends State<NotesPage> {
       _executeNotesSearchFilter();
     }
 
-    final String dynamicFetchUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes/user/$activeId';
+    final String dynamicFetchUrl = 'http://192.168.100.33:8080/api/notes/user/$activeId';
 
     try {
       final response = await http.get(Uri.parse(dynamicFetchUrl)).timeout(const Duration(seconds: 4));
@@ -155,6 +159,10 @@ class _NotesPageState extends State<NotesPage> {
       if (response.statusCode == 200) {
         List<dynamic> networkNotes = jsonDecode(response.body);
         _isOfflineMode = false;
+
+        if (mounted) {
+          setState(() => _isOfflineMode = false);
+        }
 
         if (networkNotes.isNotEmpty) {
           await LocalDatabaseHelper.instance.refreshLocalCache(networkNotes);
@@ -193,6 +201,7 @@ class _NotesPageState extends State<NotesPage> {
     final int activeId = SessionManager.currentUserId;
     final db = await LocalDatabaseHelper.instance.database;
 
+    // 1. Handle Pending Deletions
     final List<Map<String, dynamic>> pendingDeletions = await db.query(
         'local_notes',
         where: 'syncStatus = ? AND userId = ?',
@@ -201,7 +210,7 @@ class _NotesPageState extends State<NotesPage> {
 
     for (var note in pendingDeletions) {
       final int targetId = note['id'];
-      final String deleteUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes/delete/$targetId';
+      final String deleteUrl = 'http://192.168.100.33:8080/api/notes/delete/$targetId';
 
       try {
         final response = await http.delete(Uri.parse(deleteUrl)).timeout(const Duration(seconds: 4));
@@ -211,6 +220,71 @@ class _NotesPageState extends State<NotesPage> {
         }
       } catch (e) {
         print('🚨 BACKGROUND DELETION LOG STALL: Server unreachable.');
+      }
+    }
+
+    // 2. Handle Pending Additions/Updates
+    final List<Map<String, dynamic>> pendingSyncs = await db.query(
+        'local_notes',
+        where: 'syncStatus = ? AND userId = ?',
+        whereArgs: ['PENDING', activeId]
+    );
+
+    for (var note in pendingSyncs) {
+      final int localId = note['id'];
+      final bool isNewNote = localId < 0;
+
+      final Map<String, dynamic> notePayload = {
+        "title": note['title'],
+        "content": note['content'],
+        "userId": activeId,
+        "eventId": note['eventId'],
+        "eventTitle": note['eventTitle'],
+        "createdAt": note['createdAt'],
+      };
+
+      try {
+        http.Response response;
+        if (isNewNote) {
+          response = await http.post(
+            Uri.parse('http://192.168.100.33:8080/api/notes/add/$activeId'),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode(notePayload),
+          ).timeout(const Duration(seconds: 5));
+        } else {
+          response = await http.put(
+            Uri.parse('http://192.168.100.33:8080/api/notes/update/$localId'),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode(notePayload),
+          ).timeout(const Duration(seconds: 5));
+        }
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          final data = jsonDecode(response.body);
+          final serverId = data['id'];
+
+          if (isNewNote && serverId != null) {
+            await db.update(
+              'local_notes',
+              {
+                'id': int.parse(serverId.toString()),
+                'syncStatus': 'SYNCED'
+              },
+              where: 'id = ?',
+              whereArgs: [localId],
+            );
+          } else {
+            await db.update(
+              'local_notes',
+              {'syncStatus': 'SYNCED'},
+              where: 'id = ?',
+              whereArgs: [localId],
+            );
+          }
+          print('✅ BACKGROUND SYNC: Note $localId synchronized.');
+        }
+      } catch (e) {
+        print('🚨 BACKGROUND SYNC STALL: $e');
       }
     }
   }
@@ -312,7 +386,7 @@ class _NotesPageState extends State<NotesPage> {
     }
 
     bool cloudDeleteSuccess = false;
-    final String deleteUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes/delete/$targetId';
+    final String deleteUrl = 'http://192.168.100.33:8080/api/notes/delete/$targetId';
 
     try {
       final response = await http.delete(Uri.parse(deleteUrl)).timeout(const Duration(seconds: 4));
@@ -362,7 +436,7 @@ class _NotesPageState extends State<NotesPage> {
     if (!_isOfflineMode) {
       try {
         final bool targetStatusForServer = (updatedBitValue == 1);
-        final String favUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes/$targetNoteId/favorite?status=$targetStatusForServer';
+        final String favUrl = 'http://192.168.100.33:8080/api/notes/$targetNoteId/favorite?status=$targetStatusForServer';
         await http.patch(Uri.parse(favUrl)).timeout(const Duration(seconds: 4));
       } catch (_) {}
     }
@@ -427,113 +501,126 @@ class _NotesPageState extends State<NotesPage> {
       body: RefreshIndicator(
         onRefresh: _loadNotesDataEngine,
         color: Colors.blueAccent,
+        // 🟩 Swapped target layout wrapper to a fixed Column layer
         child: Stack(
           children: [
-            ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: searchFieldBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: borderStrokeColor, width: 1.2),
-                  ),
-                  child: TextField(
-                    controller: _searchController, // 🔗 Bound the state search engine controller here!
-                    style: TextStyle(color: mainTextColor),
-                    decoration: InputDecoration(
-                      hintText: 'Search for notes and readings',
-                      hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
-                      prefixIcon: Icon(Icons.search, color: isDark ? Colors.white60 : Colors.black54, size: 20),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () => _searchController.clear(),
-                      )
-                          : null,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 🔍 FIXED SEARCH COMPONENT (Stays anchored at the top)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: searchFieldBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: borderStrokeColor, width: 1.2),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: TextStyle(color: mainTextColor),
+                      decoration: InputDecoration(
+                        hintText: 'Search for notes and readings',
+                        hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
+                        prefixIcon: Icon(Icons.search, color: isDark ? Colors.white60 : Colors.black54, size: 20),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => _searchController.clear(),
+                        )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
+                  const SizedBox(height: 20),
 
-                Row(
-                  children: [
-                    const Text('=', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                    const SizedBox(width: 8),
-                    Text('My saved notes.', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mainTextColor)),
-                  ],
-                ),
-                const SizedBox(height: 10),
+                  // 📝 SECTION 1 HEADER: SAVED NOTES
+                  Row(
+                    children: [
+                      const Text('=', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                      const SizedBox(width: 8),
+                      Text('My saved notes.', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mainTextColor)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
 
-                _isLoading
-                    ? const Padding(
-                  padding: EdgeInsets.all(40.0),
-                  child: Center(child: CircularProgressIndicator.adaptive()),
-                )
-                    : savedNotesList.isEmpty
-                    ? Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10.0),
-                  child: Text(
-                      _searchController.text.isNotEmpty ? 'No matching personal notes found.' : 'You have not saved any note yet.',
-                      style: const TextStyle(color: Colors.grey)),
-                )
-                    : ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: savedNotesList.length,
-                  itemBuilder: (context, index) {
-                    final note = savedNotesList[index];
-                    final int masterIndex = _displayNotes.indexWhere((element) => element['id'].toString() == note['id'].toString());
-                    return _buildNoteItemRow(_displayNotes[masterIndex], index + 1, mainTextColor, isDark);
-                  },
-                ),
+                  // 🟩 INDEPENDENT SCROLL ZONE 1
+                  Expanded(
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator.adaptive())
+                        : savedNotesList.isEmpty
+                        ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10.0),
+                      child: Text(
+                          _searchController.text.isNotEmpty ? 'No matching personal notes found.' : 'You have not saved any note yet.',
+                          style: const TextStyle(color: Colors.grey)),
+                    )
+                        : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(), // Enable dedicated scrolling logic
+                      itemCount: savedNotesList.length,
+                      itemBuilder: (context, index) {
+                        final note = savedNotesList[index];
+                        final int masterIndex = _displayNotes.indexWhere((element) => element['id'].toString() == note['id'].toString());
+                        return _buildNoteItemRow(_displayNotes[masterIndex], index + 1, mainTextColor, isDark);
+                      },
+                    ),
+                  ),
 
-                const SizedBox(height: 20),
-                Divider(thickness: 1, color: inlineDividerColor),
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                  Divider(thickness: 1, color: inlineDividerColor),
+                  const SizedBox(height: 10),
 
-                Row(
-                  children: [
-                    const Text('=', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                    const SizedBox(width: 8),
-                    Text(
+                  // 📖 SECTION 2 HEADER: EVENT READINGS
+                  Row(
+                    children: [
+                      const Text('=', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                      const SizedBox(width: 8),
+                      Text(
                         'My Events readings.',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mainTextColor, decoration: TextDecoration.underline, decorationColor: mainTextColor)
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: mainTextColor,
+                            decoration: TextDecoration.underline,
+                            decorationColor: mainTextColor
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
 
-                _isLoading
-                    ? const Padding(
-                  padding: EdgeInsets.all(40.0),
-                  child: Center(child: CircularProgressIndicator.adaptive()),
-                )
-                    : eventReadingsList.isEmpty
-                    ? Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10.0),
-                  child: Text(
-                      _searchController.text.isNotEmpty ? 'No matching event readings found.' : 'Notes generated through church events will display down here.',
-                      style: const TextStyle(color: Colors.grey, fontSize: 13, fontStyle: FontStyle.italic)),
-                )
-                    : ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: eventReadingsList.length,
-                  itemBuilder: (context, index) {
-                    final note = eventReadingsList[index];
-                    final int masterIndex = _displayNotes.indexWhere((element) => element['id'].toString() == note['id'].toString());
-                    return _buildEventItemRow(_displayNotes[masterIndex], index + 1, mainTextColor, isDark);
-                  },
-                ),
-                const SizedBox(height: 100),
-              ],
+                  // 🟩 INDEPENDENT SCROLL ZONE 2
+                  Expanded(
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator.adaptive())
+                        : eventReadingsList.isEmpty
+                        ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10.0),
+                      child: Text(
+                          _searchController.text.isNotEmpty ? 'No matching event readings found.' : 'Notes generated through church events will display down here.',
+                          style: const TextStyle(color: Colors.grey, fontSize: 13, fontStyle: FontStyle.italic)),
+                    )
+                        : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(), // Enable dedicated scrolling logic
+                      itemCount: eventReadingsList.length,
+                      itemBuilder: (context, index) {
+                        final note = eventReadingsList[index];
+                        final int masterIndex = _displayNotes.indexWhere((element) => element['id'].toString() == note['id'].toString());
+                        return _buildEventItemRow(_displayNotes[masterIndex], index + 1, mainTextColor, isDark);
+                      },
+                    ),
+                  ),
+
+                  // Bottom margin offset placeholder for FAB safe placement clearance
+                  const SizedBox(height: 70),
+                ],
+              ),
             ),
 
+            // ➕ PERSISTENT ADD NOTE FAB BUTTON LAYER
             Positioned(
               bottom: 20,
               right: 20,

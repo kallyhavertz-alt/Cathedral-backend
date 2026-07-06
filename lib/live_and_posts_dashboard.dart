@@ -110,7 +110,12 @@ class _LiveAndPostsDashboardState extends State<LiveAndPostsDashboard> {
       final url = '$_baseUrl/posts/$postId/comment?memberId=${widget.currentMemberId}&content=${Uri.encodeComponent(text)}';
       final response = await http.post(Uri.parse(url));
       if (response.statusCode == 200) {
-        _loadAllDashboardData();
+        final Map<String, dynamic> newCommentJson = json.decode(response.body);
+        setState(() {
+          final target = _communityFeed.firstWhere((p) => p.id == postId);
+          target.comments.insert(0, CommentModel.fromJson(newCommentJson));
+          target.commentsCount += 1;
+        });
       }
     } catch (e) {
       print("Error processing community comment: $e");

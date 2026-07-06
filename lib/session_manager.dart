@@ -30,7 +30,10 @@ class SessionManager {
     print("🚀 SESSION ENGINE REBOOT: Loaded User ID ($currentUserId) [$currentUserLabel]");
 
     // 🔑 2. NEW: Restore Temporary Staff Portal Session Identity if present
-    currentStaffId = rootrefs.getString('activeStaffId');
+    String? staffId = rootrefs.getString('activeStaffId');
+    if (staffId == "null") staffId = null;
+    currentStaffId = staffId;
+
     isStaffActive = rootrefs.getBool('isStaffRegistered') ?? false;
     print("🛰️ STAFF LAYER REBOOT: Active Staff ID ($currentStaffId) | Verified Status: $isStaffActive");
 

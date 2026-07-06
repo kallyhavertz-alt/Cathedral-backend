@@ -6,6 +6,9 @@ import 'package:untitled/session_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:untitled/bb_text_formatter.dart';
+import 'file_download_service.dart';
+
 class ChurchSchedulesScreen extends StatefulWidget {
   const ChurchSchedulesScreen({super.key});
 
@@ -23,52 +26,6 @@ class _ChurchSchedulesScreenState extends State<ChurchSchedulesScreen> {
   // Active state holders for text-based fallback display
   String _currentCanvasTitle = "General Schedule";
   String _currentCanvasContent = "No custom text notes provided.";
-
-  // 🚀 UPDATED DYNAMIC SHARE payload content engine
-  void _executeShareSheet() {
-    String sharePayload = "";
-
-    if (_currentCanvasFileUrl != null) {
-      sharePayload = """
-       ACK ST. JAMES KIAMBU - SCHEDULE DOCUMENT ATTACHED
-Title: $_currentCanvasTitle
-
-You can view or download the active attachment file here:
-http://192.168.100.33:8080$_currentCanvasFileUrl
-""";
-    } else if (_currentCanvasContent.isNotEmpty && _currentCanvasContent != "No custom text notes provided.") {
-      sharePayload = """
-ACK ST. JAMES KIAMBU - SCHEDULE NOTICE
- Title: $_currentCanvasTitle
-
-$_currentCanvasContent
-""";
-    } else {
-      sharePayload = """
- ACK ST. JAMES KIAMBU GENERAL SCHEDULES
-
- SUNDAY SERVICES:
-• Kikuyu Service: 6:00 am - 7:00 am
-• Kiswahili Service: 7:00 am - 9:00 am
-• English Service: 9:00 am - 11:00 am
-• Main Kikuyu Service: 11:00 am - 1:30 pm
-
-MID-WEEK SERVICES:
-• Wednesday Lunch Hour (Holy Communion): 11:00 am - 2:00 pm
-• Friday Hymns: 5:00 pm - 7:00 pm
-• Saturday: Church Cleaning
-
- OTHER MINISTRIES (Scheduled):
-• Dorcas Ministry
-• Prisons Ministry
-• Schools Ministry
-
-👉 Continue visiting this page for more updates!
-""";
-    }
-
-    Share.share(sharePayload, subject: _currentCanvasTitle.isNotEmpty ? _currentCanvasTitle : 'ACK St. James Kiambu Schedules');
-  }
 
   @override
   void initState() {
@@ -480,19 +437,21 @@ MID-WEEK SERVICES:
                     child: Row(
                       children: [
                         _buildFloatingActionButton(
-                          icon: Icons.share_rounded,
-                          label: 'Share',
-                          onTap: _executeShareSheet,
-                        ),
-                        const SizedBox(width: 12),
-                        _buildFloatingActionButton(
                           icon: Icons.file_download_rounded,
-                          label: 'Save',
+                          label: 'Save & Share',
                           onTap: () {
-                            // 🟩 KEPT FUNCTIONAL: Hook up your internal file saving download pipeline task here
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Downloading attachment file pipeline initialized...')),
-                            );
+                            if (_currentCanvasFileUrl != null) {
+                              final String fileName = _currentCanvasFileUrl!.split('/').last;
+                              FileDownloadService.downloadAndShare(
+                                context,
+                                'http://192.168.100.33:8080$_currentCanvasFileUrl',
+                                fileName.contains('.') ? fileName : '$fileName.${_currentCanvasType == "PDF" ? "pdf" : "jpg"}',
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No attachment to save.')),
+                              );
+                            }
                           },
                         ),
                       ],

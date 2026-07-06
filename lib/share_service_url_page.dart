@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:untitled/session_manager.dart';
 
 class ShareServiceLinkPage extends StatefulWidget {
   final Color primaryColor;
@@ -17,16 +18,16 @@ class ShareServiceLinkPage extends StatefulWidget {
 class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
   final _formKey = GlobalKey<FormState>();
 
-  // 🟩 Grouped safely together at the top level
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _urlController = TextEditingController();
 
   bool _isLiveStream = true;
+  int _selectedDurationMinutes = 120; // ⏳ Default: 2 hours
   bool _isLoading = false;
   List<dynamic> _sharedUrlsLog = [];
 
-   String _baseUrl = 'http://192.168.100.33:8080/api/services';
+  String _baseUrl = 'http://192.168.100.33:8080/api/v1';
 
   @override
   void initState() {
@@ -36,17 +37,37 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
 
   @override
   void dispose() {
-    // 🟩 Clean up ALL controllers safely here when leaving the page
     _titleController.dispose();
     _descriptionController.dispose();
     _urlController.dispose();
     super.dispose();
   }
-
-  // 📥 GET Request: Fetch existing service items from Spring Boot
-  Future<void> _fetchSharedUrls() async {
+  String _formatNotificationTime(String? isoString) {
+    if (isoString == null || isoString.isEmpty) return "Recent";
     try {
-      final response = await http.get(Uri.parse(_baseUrl));
+      final DateTime notificationDate = DateTime.parse(isoString).toLocal();
+      final DateTime now = DateTime.now();
+      final Duration difference = now.difference(notificationDate);
+
+      if (difference.inMinutes < 1) {
+        return "Just now";
+      } else if (difference.inMinutes < 60) {
+        return "${difference.inMinutes}m ago";
+      } else if (difference.inHours < 24) {
+        return "${difference.inHours}h ago";
+      } else {
+        return "${notificationDate.day}/${notificationDate.month}/${notificationDate.year}";
+      }
+    } catch (e) {
+      return "Recent";
+    }
+  }
+
+  Future<void> _fetchSharedUrls() async {
+    final String? activeStaff = SessionManager.currentStaffId;
+    if (activeStaff == null) return;
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/public/shared-urls?senderId=$activeStaff'));
       if (response.statusCode == 200) {
         setState(() {
           _sharedUrlsLog = json.decode(response.body);
@@ -59,6 +80,9 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
 
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
+
+    final String? activeStaff = SessionManager.currentStaffId;
+    if (activeStaff == null) return;
 
     setState(() {
       _isLoading = true;
@@ -77,6 +101,9 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
           'description': _descriptionController.text.trim(),
           'videoUrl': _urlController.text.trim(),
           'videoType': _isLiveStream ? 'LIVE' : 'PAST_SERVICE',
+          'senderId': activeStaff,
+          // ⏳ Send duration to backend if live (send '0' if it's already an archived/past video)
+          'durationMinutes': _isLiveStream ? _selectedDurationMinutes.toString() : '0',
         },
       );
 
@@ -163,7 +190,7 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
             ),
             const SizedBox(height: 20),
 
-            // 🔗 YOUTUBE URL INPUT (Fixed and restored!)
+            // 🔗 YOUTUBE URL INPUT
             TextFormField(
               controller: _urlController,
               style: TextStyle(color: mainTextColor),
@@ -197,11 +224,47 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
               value: _isLiveStream,
               onChanged: (bool value) {
                 setState(() {
-                  _isLiveStream = value; // 🟩 Dangerous line completely removed!
+                  _isLiveStream = value;
                 });
               },
             ),
             const SizedBox(height: 12),
+
+            // ⏳ DURATION SELECTOR (Animate its entry dynamically if stream is set to live)
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              child: _isLiveStream
+                  ? Padding(
+                padding: const EdgeInsets.only(bottom: 20.0),
+                child: DropdownButtonFormField<int>(
+                  value: _selectedDurationMinutes,
+                  dropdownColor: Theme.of(context).cardColor,
+                  style: TextStyle(color: mainTextColor),
+                  decoration: InputDecoration(
+                    labelText: 'LIVE STREAM EXPECTED DURATION',
+                    labelStyle: TextStyle(color: widget.primaryColor, fontWeight: FontWeight.bold, fontSize: 12),
+                    border: const OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.access_time_filled, color: widget.primaryColor),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 30, child: Text('30 Minutes')),
+                    DropdownMenuItem(value: 60, child: Text('1 Hour')),
+                    DropdownMenuItem(value: 90, child: Text('1.5 Hours')),
+                    DropdownMenuItem(value: 120, child: Text('2 Hours')),
+                    DropdownMenuItem(value: 180, child: Text('3 Hours')),
+                    DropdownMenuItem(value: 240, child: Text('4 Hours')),
+                  ],
+                  onChanged: (int? newValue) {
+                    if (newValue != null) {
+                      setState(() {
+                        _selectedDurationMinutes = newValue;
+                      });
+                    }
+                  },
+                ),
+              )
+                  : const SizedBox.shrink(),
+            ),
 
             // 🚀 SUBMIT BUTTON
             Align(
@@ -267,8 +330,8 @@ class _ShareServiceLinkPageState extends State<ShareServiceLinkPage> {
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          logItem['createdAtStr'] ?? logItem['date'] ?? '',
-                          style: TextStyle(color: subTextColor, fontSize: 12),
+                          _formatNotificationTime(logItem['created_at']),
+                          style: TextStyle(color: subTextColor, fontSize: 11, fontWeight: FontWeight.w400),
                         ),
                       ],
                     ),

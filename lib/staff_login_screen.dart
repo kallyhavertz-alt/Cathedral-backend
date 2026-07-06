@@ -14,6 +14,7 @@ class StaffLoginScreen extends StatefulWidget {
 
 class _StaffLoginScreenState extends State<StaffLoginScreen> {
   final _loginFormKey = GlobalKey<FormState>();
+  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _loginIdController = TextEditingController();
   final TextEditingController _loginPasswordController = TextEditingController();
   bool _isLoggingIn = false;
@@ -47,9 +48,14 @@ class _StaffLoginScreenState extends State<StaffLoginScreen> {
       if (response.statusCode == 200) {
         // Parse the body response payload to extract who logged in
         final Map<String, dynamic> responseData = jsonDecode(response.body);
+        await SessionManager.clearStaffSession();
 
-        // 🔑 Extract unique identity handle (adjust to 'staffId' or 'id' if your Spring Boot model differs)
-        final String authenticatedStaffId = (responseData['identity'] ?? _loginIdController.text.trim()).toString();
+        final String authenticatedStaffId = (responseData['email'] ?? _loginIdController.text.trim()).toString();
+
+        if (authenticatedStaffId.isEmpty || authenticatedStaffId == "null") {
+           _showLoginSnackBar('Critical Error: Could not determine staff identity.');
+           return;
+        }
 
         // 🔒 SECURE CENTRAL SESSION: Instantly flag runtime and persistent storage keys
         await SessionManager.startStaffSession(authenticatedStaffId);

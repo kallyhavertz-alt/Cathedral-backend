@@ -1,9 +1,9 @@
-/*
-import 'dart:ffi';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+
+import 'package:untitled/posts_tab.dart';
+
 
 class AdminReportsScreen extends StatefulWidget {
   final String? adminMemberId;
@@ -40,7 +40,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     }
   }
 
-   Future<void> _banUserEmail(String email) async {
+  Future<void> _banUserEmail(String email) async {
     final String url = 'http://192.168.100.33:8080/api/v1/community/admin/reports/ban-user?email=${Uri.encodeComponent(email)}';
 
     try {
@@ -56,7 +56,6 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     }
   }
 
-  // 🗑️ DELETE /api/v1/community/admin/reports/{reportId}/dismiss
   Future<void> _dismissReport(int reportId) async {
     final String url = 'http://192.168.100.33:8080/api/v1/community/admin/reports/$reportId/dismiss';
 
@@ -73,7 +72,44 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     }
   }
 
-  Future<void> _deleteOffendingPost(int postId) async {
+   void _deleteOffendingPost(int postId) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.delete_forever, color: Colors.blueGrey),
+              SizedBox(width: 8),
+              Text('Confirm Post Deletion'),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to remove this post from the community feed? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueGrey,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Remove Content'),
+              onPressed: () {
+                Navigator.pop(context);
+                _executePostDeletion(postId);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _executePostDeletion(int postId) async {
     final String url = 'http://192.168.100.33:8080/api/v1/community/posts/$postId?memberId=${widget.adminMemberId}';
 
     try {
@@ -101,7 +137,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     final Color mainTextColor = isDark ? Colors.white : Colors.black87;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: isDark ? Colors.grey[900] : Colors.grey[100],
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -149,101 +185,133 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
 
           return ListView.builder(
             itemCount: reportsList.length,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             itemBuilder: (context, index) {
               final report = reportsList[index];
 
-               final int reportId = report['reportId'] ?? 0;
-              final int postId = report['postId'] ?? 0;
+              final int reportId = report['reportId'] ?? 0;
               final String reporterName = report['reporterEmail'] ?? 'Anonymous';
-              final String authorName = report['reportedUserEmail'] ?? 'Unknown Member';
-              final String authorEmail = report['reportedUserEmail'] ?? '';
               final String category = report['category'] ?? 'OTHER';
               final String detailedReason = report['reason'] ?? 'No comment context provided.';
-              final String postCaptionPreview = report['postMediaUrl'] ?? '[Empty Content File Attachment Only]';
+
+               final Map<String, dynamic>? postData = report['post'];
+
+              final int postId = postData != null ? (postData['id'] ?? 0) : (report['postId'] ?? 0);
+              final String authorEmail = postData != null ? (postData['authorEmail'] ?? postData['email'] ?? report['reportedUserEmail'] ?? '') : '';
+              final String authorName = postData != null ? (postData['memberName'] ?? postData['authorName'] ?? 'Unknown Member') : 'Unknown Member';
 
               return Card(
-                elevation: 2,
+                elevation: 3,
                 margin: const EdgeInsets.only(bottom: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header Flag Status Band
+                    Container(
+                      color: Colors.orange.withOpacity(0.12),
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.amber),
-                            ),
-                            child: Text(
-                              category.replaceAll('_', ' '),
-                              style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 11),
-                            ),
+                          Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                              const SizedBox(width: 6),
+                              Text(
+                                category.replaceAll('_', ' '),
+                                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                            ],
                           ),
-                          Text('Report #${reportId}', style: const TextStyle(color: Colors.grey, fontSize: 12, fontFamily: 'monospace')),
+                          Text('Report #$reportId', style: const TextStyle(color: Colors.grey, fontSize: 11, fontFamily: 'monospace')),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                    ),
 
-                      Text('Flagged Post Content Preview:', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 12, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(
-                        '"$postCaptionPreview"',
-                        style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 14),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const Divider(height: 24),
-
-                      _buildAuditLine('Posted By:', '$authorName ($authorEmail)', isDark),
-                      _buildAuditLine('Flagged By:', reporterName, isDark),
-                      _buildAuditLine('Report Reason:', detailedReason, isDark),
-                      const SizedBox(height: 16),
-
-                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                           OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.green,
-                              side: const BorderSide(color: Colors.green),
-                            ),
-                            icon: const Icon(Icons.check_circle_outline, size: 16),
-                            label: const Text('Dismiss'),
-                            onPressed: () => _dismissReport(reportId),
-                          ),
-
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.blueGrey,
-                              side: const BorderSide(color: Colors.blueGrey),
-                            ),
-                            icon: const Icon(Icons.delete_outline, size: 16),
-                            label: const Text('Delete Post'),
-                            onPressed: () => _deleteOffendingPost(postId),
-                          ),
-
-                           ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              foregroundColor: Colors.white,
-                            ),
-                            icon: const Icon(Icons.gavel_rounded, size: 16),
-                            label: const Text('Ban User'),
-                            onPressed: authorEmail.isEmpty ? null : () {
-                              _showActionConfirmationDialog(authorName, authorEmail);
-                            },
-                          ),
-                        ],
+                    // 🟩 REUSE FEED WIDGET PREVIEW FRAME
+                    if (postData != null)
+                      Padding(
+                        padding: const EdgeInsets.all(12.0),
+                         child: CommunityPostCard(
+                          post: postData,
+                        ),
                       )
-                    ],
-                  ),
+                    else
+                      const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text(
+                          'Targeted post context data could not be parsed or was cleaned up.',
+                          style: TextStyle(color: Colors.redAccent, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+
+                    const Divider(height: 1),
+
+                    // Audit Metadata Segment
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildAuditLine('Flagged By:', reporterName, isDark),
+                          _buildAuditLine('Report Reason:', detailedReason, isDark),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Admin Actions Control row
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.green,
+                                side: const BorderSide(color: Colors.green),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.check_circle_outline, size: 16),
+                              label: const Text('Dismiss'),
+                              onPressed: () => _dismissReport(reportId),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.blueGrey,
+                                side: const BorderSide(color: Colors.blueGrey),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.delete_outline, size: 16),
+                              label: const Text('Delete Post'),
+                              onPressed: () => _deleteOffendingPost(postId),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                elevation: 0,
+                              ),
+                              icon: const Icon(Icons.gavel_rounded, size: 16),
+                              label: const Text('Ban User'),
+                              onPressed: authorEmail.isEmpty ? null : () {
+                                _showActionConfirmationDialog(authorName, authorEmail);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  ],
                 ),
               );
             },
@@ -291,4 +359,3 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     );
   }
 }
- */

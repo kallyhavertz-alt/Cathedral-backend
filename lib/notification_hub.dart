@@ -11,13 +11,14 @@ class NotificationHub {
   final ValueNotifier<List<Map<String, dynamic>>> messagesList = ValueNotifier([]);
 
   ///  Call this inside your Firebase Messaging onMessage (Foreground) handler!
-  Future<void> receiveForegroundNotification(String title, String body, String updateType) async {
+  Future<void> receiveForegroundNotification(String title, String body, String updateType, String createdAtTimeStr) async {
     // 1. Create the structured payload object matching your layout expectations
     final Map<String, dynamic> newAlert = {
       'title': title,
       'body': body,
       'updateType': updateType,
-      'timestamp': DateTime.now().toIso8601String(),
+      'created_at': createdAtTimeStr,
+      //'timestamp': DateTime.now().toIso8601String(),
       'isRead': false, // Added this key explicitly for history panel tracking
     };
 

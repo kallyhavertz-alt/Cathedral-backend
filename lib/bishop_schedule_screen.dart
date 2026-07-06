@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'event_details_screen.dart';
+import 'bb_text_formatter.dart';
+import 'file_download_service.dart';
 
 class BishopScheduleScreen extends StatefulWidget {
   const BishopScheduleScreen({Key? key}) : super(key: key);
@@ -62,6 +64,29 @@ class _BishopScheduleScreenState extends State<BishopScheduleScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Helper logic to isolate and extract the first name from the sender ID string safely
+  String _getSenderFirstName(dynamic senderId) {
+    if (senderId == null || senderId.toString().trim().isEmpty) {
+      return "Staff";
+    }
+
+    String cleanId = senderId.toString().trim();
+
+    // If it's an email string, split before the domain boundary
+    if (cleanId.contains('@')) {
+      cleanId = cleanId.split('@')[0];
+    }
+
+    // Split by spaces or underscores to grab the first structural name segment
+    List<String> parts = cleanId.split(RegExp(r'[\s_.]'));
+    if (parts.isNotEmpty && parts[0].isNotEmpty) {
+      // Capitalize the first letter for a clean appearance
+      return parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
+    }
+
+    return "Staff";
   }
 
   @override
@@ -152,19 +177,32 @@ class _BishopScheduleScreenState extends State<BishopScheduleScreen> {
 
   // ==================== 🛠️ NEW UPDATED CARD LAYOUT ====================
   Widget _buildScheduleCardLayout(Map<String, dynamic> item) {
-    // Safely pull sender/poster data from payload mapping fields (handles maps or nested structures gracefully)
-    final String postedBy = item['senderName'] ?? item['postedBy'] ?? 'Cathedral Admin';
+    final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
+
+    // 🔍 1. Identify if a valid server image url was fetched
+    String? fileUrl = item['fileUrl'];
+    String isFileType = item['isFileType'] ?? 'TEXT';
+    bool hasLiveImage = (isFileType == "IMAGE" && fileUrl != null && fileUrl.isNotEmpty);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-      height: 165, // Increased slightly to comfortably hold "Posted by" footprint metadata
+      height: 180,
       child: Stack(
         children: [
-          // 🖼️ 1. BACKGROUND GRADIENT IMAGE (Faded overlay so absolute left alignment text stands out)
+          // 🖼️ DYNAMIC LIVE IMAGE / FALLBACK CANVAS BACKGROUND
           Positioned.fill(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.asset(
+              child: hasLiveImage
+                  ? Image.network(
+                'http://192.168.100.33:8080$fileUrl', // Your local Spring Boot server asset port
+                fit: BoxFit.cover,
+                errorBuilder: (c, e, s) => Container(
+                  color: Colors.blueGrey,
+                  child: const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 40),
+                ),
+              )
+                  : Image.asset(
                 'assets/icons/bishop.png',
                 fit: BoxFit.cover,
                 alignment: Alignment.centerLeft,
@@ -173,66 +211,60 @@ class _BishopScheduleScreenState extends State<BishopScheduleScreen> {
             ),
           ),
 
-          // 🎨 2. BALANCED DARK TINT OVERLAY (Ensures text on absolute left reads perfectly)
+          // 🏁 CONTRAST GRADIENT OVERLAY LAYER
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.85),
-                    Colors.black.withValues(alpha: 0.70),
-                    Colors.black.withValues(alpha: 0.90),
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: hasLiveImage ? 0.9 : 0.85)
                   ],
                 ),
               ),
             ),
           ),
 
-          // 📝 3. ABSOLUTE LEFT ALIGNED LAYOUT + GESTURE ROUTING INTERACTION
+          // 📝 FOREGROUND CONTENT CONTAINER
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
               children: [
-                // Text column starts completely from absolute left now!
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Text(
                         item['title'].toString().toUpperCase(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
                           color: Colors.amberAccent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        item['content'] ?? '',
-                        maxLines: 2, // Dropped to 2 to make clean visual room for poster name
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.white,
-                          height: 1.3,
-                        ),
+                      const SizedBox(height: 4),
+                      BBText(
+                        text: item['content'] ?? '',
+                        charLimit: 40,
+                        color: Colors.white,
+                        fontSize: 13,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
 
-                      // 👤 POSTED BY METADATA FOOTPRINT
+                      // POSTED BY:
                       Row(
                         children: [
-                          const Icon(Icons.person_outline_rounded, size: 12, color: Colors.redAccent),
+                          const Icon(Icons.person_pin_circle_rounded, size: 14, color: Colors.redAccent),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              'By: $postedBy',
+                              'Posted by: $uploaderName',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold),
@@ -242,7 +274,7 @@ class _BishopScheduleScreenState extends State<BishopScheduleScreen> {
                       ),
                       const SizedBox(height: 2),
 
-                      // TIME & DATE ROW
+                      // timestamp
                       Row(
                         children: [
                           const Icon(Icons.calendar_today, size: 11, color: Colors.white60),
@@ -250,50 +282,53 @@ class _BishopScheduleScreenState extends State<BishopScheduleScreen> {
                           Expanded(
                             child: Text(
                               '${item['formattedDate'] ?? 'Today'} | 🕒 ${item['formattedTime'] ?? 'Now'}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w500),
+                              style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w500, fontSize: 11),
                             ),
                           ),
                         ],
-                      )
+                      ),
                     ],
                   ),
                 ),
-
-                const SizedBox(width: 12),
-
-                // 🎯 INTERACTIVE ACK EMBLEM SYMBOL GESTURE DETECTOR
-                GestureDetector(
-                  onTap: () {
-
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => EventDetailsScreen(eventItem: item, eventData: {},)),
-                    );
-
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white10,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1),
-                    ),
-                    child: ClipOval(
-                      child: Image.asset(
-                        'assets/icim/cathsign.jpg',
-                        width: 42,
-                        height: 42,
-                        fit: BoxFit.contain,
-                        errorBuilder: (c, e, s) => const Icon(Icons.church, color: Colors.redAccent, size: 28),
-                      ),
-                    ),
-                  ),
-                ),
+                const SizedBox(width: 56),
               ],
             ),
           ),
+
+          // Action navigation symbol
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => EventDetailsScreen(
+                      eventData: item,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                height: 44,
+                width: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white70, width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 3))
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/icim/cathsign.jpg',
+                    fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const Icon(Icons.church, color: Colors.redAccent),
+                  ),
+                ),
+              ),
+            ),
+          )
         ],
       ),
     );

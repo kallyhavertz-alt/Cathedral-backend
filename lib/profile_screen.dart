@@ -6,8 +6,10 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:untitled/session_manager.dart';
 import 'package:untitled/settings_screen.dart';
+import 'package:untitled/local_database_helper.dart';
 
 import 'create_post_modal.dart';
+import 'event_details_screen.dart';
 import 'feed_video_preview.dart';
 import 'note_work_space_screen.dart';
 
@@ -33,6 +35,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<dynamic> _liveEvents = [];
   List<Map<String, dynamic>> _myUploadedPosts = [];
   List<Map<String, dynamic>> _userFavorites = [];
+  List<Map<String, dynamic>> _feedPosts = [];
   bool _isLoadingContent = true;
   String? _serverAvatarPath;
   bool _isLoadingProfile = true;
@@ -44,6 +47,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _fetchActivityData();
     _loadUserProfileFromServer();
   }
+
+  String _selectedThemeFilter = 'ALL';
+
+  String _formatBackendDate(String? isoString) {
+    if (isoString == null) return '';
+    try {
+      DateTime parsed = DateTime.parse(isoString);
+       return "${parsed.day}/${parsed.month}/${parsed.year}";
+    } catch (e) {
+      return '';
+    }
+  }
+  // 💡 Ensure your local server url base matches your working setup:
+// final String _communityBaseUrl = 'http://192.168.100.33:8080/api/v1/community';
+
+  Future<void> _deleteMemberPost(dynamic postItem) async {
+    final int? postId = postItem['id'] ?? postItem['postId'];
+    final int activeMemberId = SessionManager.currentUserId;
+
+    if (postId == null) return;
+
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 1. Show Confirmation Sheet / Dialog Box
+    bool confirmDelete = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          backgroundColor: Theme.of(dialogContext).cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Row(
+            children: [
+              Icon(Icons.delete_forever, color: Colors.redAccent, size: 26),
+              SizedBox(width: 8),
+              Text('Delete Post', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to permanently delete this post from the community feed? This action cannot be undone.',
+            style: TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'CANCEL',
+                style: TextStyle(color: isDark ? Colors.white60 : Colors.grey.shade600, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('DELETE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    ) ?? false;
+
+    if (!confirmDelete) return;
+
+    // 2. Fire the Network Call to Spring Boot
+    final String deleteUrl = 'http://192.168.100.33:8080/api/v1/community/posts/$postId?memberId=$activeMemberId';
+
+    try {
+      final response = await http.delete(Uri.parse(deleteUrl)).timeout(const Duration(seconds: 7));
+
+      if (response.statusCode == 200) {
+        // 3. Update active UI State Array (Assumes your feed array is called _feedPosts or _memberPosts)
+        setState(() {
+          // Targets whichever tracking array is active on this view layout screen
+          _feedPosts.removeWhere((element) => (element['id'] ?? element['postId']) == postId);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✨ Post successfully removed from community feed.'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        // Handles cases where the backend rejects it (e.g. memberId doesn't own the post)
+        throw Exception("Server rejected action or permission denied.");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete post: ${e.toString().split('\n').first}'),
+          backgroundColor: Colors.red.shade800,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
 
   Future<void> _loadUserProfileFromServer() async {
     try {
@@ -84,23 +187,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _isLoadingContent = true;
     });
 
-    try {
-      final String targetUrl = 'http://192.168.100.33:8080/api/v1/community/posts/member?memberId=${SessionManager.currentUserId}';
-      final response = await http.get(Uri.parse(targetUrl));
+    final String postsUrl = 'http://192.168.100.33:8080/api/v1/community/posts/member?memberId=${SessionManager.currentUserId}';
+    final String themesUrl = 'http://192.168.100.33:8080/api/v1/public/themes';
 
-      if (response.statusCode == 200) {
-        final List<dynamic> parsedList = json.decode(response.body);
-        setState(() {
-          _myUploadedPosts = parsedList.map((post) => {
+    try {
+      final List<Map<String, dynamic>> localFavorites = await LocalDatabaseHelper.instance.getFavoritesForUser(SessionManager.currentUserId);
+
+       final responses = await Future.wait([
+        http.get(Uri.parse(postsUrl)),
+        http.get(Uri.parse(themesUrl)),
+      ]);
+
+      final http.Response postsResponse = responses[0];
+      final http.Response themesResponse = responses[1];
+
+      setState(() {
+        _userFavorites = localFavorites.map((fav) => Map<String, dynamic>.from(fav)).toList();
+
+        if (postsResponse.statusCode == 200) {
+          final List<dynamic> parsedPosts = json.decode(postsResponse.body);
+          _myUploadedPosts = parsedPosts.map((post) => {
             'id': post['id'],
             'caption': post['caption'] ?? '',
             'mediaUrl': post['mediaUrl'] ?? '',
             'localMedia': null,
           }).toList();
-        });
-      }
+        } else {
+          debugPrint("🚨 Failed loading member posts: ${postsResponse.statusCode}");
+        }
+
+        if (themesResponse.statusCode == 200) {
+          final List<dynamic> parsedThemes = json.decode(themesResponse.body);
+          _liveEvents = parsedThemes;
+        } else {
+          debugPrint("🚨 Failed loading church themes: ${themesResponse.statusCode}");
+        }
+      });
+
     } catch (e) {
-      print("🚨 Failed to connect to backend database table view: $e");
+      print("🚨 Failed to connect to backend database endpoints: $e");
     } finally {
       if (mounted) {
         setState(() {
@@ -359,34 +484,182 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     switch (_selectedTabIndex) {
       case 0:
-        if (_liveEvents.isEmpty) {
-          return Center(
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+        final List<dynamic> filteredThemes = _liveEvents.where((theme) {
+          if (_selectedThemeFilter == 'ALL') return true;
+          return (theme['themeType'] ?? '').toString().toUpperCase() == _selectedThemeFilter;
+        }).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Icon(Icons.bookmark_border_rounded, size: 54, color: isDark ? Colors.white24 : Colors.black12),
-                  const SizedBox(height: 10),
-                  const Text('No custom themes broadcasted yet.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedThemeFilter,
+                      icon: Icon(Icons.arrow_drop_down, color: isDark ? Colors.white70 : Colors.black87),
+                      dropdownColor: Theme.of(context).cardColor,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'ALL', child: Text('All Themes')),
+                        DropdownMenuItem(value: 'WEEKLY', child: Text('Theme of the week')),
+                        DropdownMenuItem(value: 'MONTHLY', child: Text('Theme of the Month')),
+                        DropdownMenuItem(value: 'YEARLY', child: Text('Theme of the year')),
+                      ],
+                      onChanged: (String? newValue) {
+                        if (newValue != null) {
+                          setState(() {
+                            _selectedThemeFilter = newValue;
+                          });
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
-          );
-        }
-        return ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          itemCount: _liveEvents.length,
-          itemBuilder: (context, index) {
-            final theme = _liveEvents[index];
-            return ListTile(
-              leading: Icon(Icons.bookmark_added_rounded, color: isDark ? Colors.amber[300] : Colors.amber[800]),
-              title: Text(theme['title'] ?? 'Weekly Theme', style: TextStyle(fontWeight: FontWeight.bold, color: mainText)),
-              subtitle: Text(theme['duration'] ?? 'June 2026', style: TextStyle(color: subText)),
-              trailing: Icon(Icons.wb_sunny_outlined, color: trailingArrowColor, size: 18),
-            );
-          },
+
+            Expanded(
+              child: filteredThemes.isEmpty
+                  ? Center(
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.bookmark_border_rounded, size: 54, color: isDark ? Colors.white24 : Colors.black12),
+                      const SizedBox(height: 10),
+                      Text(
+                        _selectedThemeFilter == 'ALL'
+                            ? 'No custom themes broadcasted yet.'
+                            : 'No themes found matching this category.',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+                  : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                itemCount: filteredThemes.length,
+                itemBuilder: (context, index) {
+                  final theme = filteredThemes[index];
+
+                   final String rawType = theme['themeType'] ?? 'WEEKLY';
+                  final String reading = theme['reading'] ?? 'Scripture';
+                  final String themeText = theme['themeText'] ?? '';
+                  final String author = theme['postedByStaffName'] ?? 'Staff';
+                  final String dateStr = _formatBackendDate(theme['createdAt']);
+
+                  String displayTag = 'Theme of the week';
+                  if (rawType == 'MONTHLY') displayTag = 'Theme of the Month';
+                  if (rawType == 'YEARLY') displayTag = 'Theme of the year';
+
+                  return GestureDetector(
+                    onTap: () {
+
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EventDetailsScreen(themeData: theme, eventData: {},),
+                            ),
+                          );
+
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: isDark ? Colors.white10 : Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          )
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                           Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: isDark ? Colors.white30 : Colors.black87),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              displayTag,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // 📖 2. Reading Text Block
+                          Text(
+                            reading,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: mainText,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+
+                          // 📜 3. Theme Subtitle Content Description
+                          Text(
+                            themeText,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: subText,
+                              height: 1.3,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // 👤 4. Metadata Footprint Row (Author & Date)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'by $author',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: subText.withValues(alpha: 0.8),
+                                ),
+                              ),
+                              Text(
+                                dateStr,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: subText.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         );
 
       case 1:
@@ -536,6 +809,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ],
                               stops: const [0.6, 0.8, 1.0],
                             ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: CircleAvatar(
+                          backgroundColor: Colors.black.withValues(alpha: 0.4),
+                          radius: 16,
+                          child: PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert, color: Colors.white, size: 16),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            iconSize: 16,
+                            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+                            onSelected: (value) {
+                              if (value == 'delete') {
+                                _deleteMemberPost(userPost);
+                              }
+                            },
+                            itemBuilder: (BuildContext popupContext) => [
+                              const PopupMenuItem<String>(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Delete Post', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

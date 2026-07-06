@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'event_details_screen.dart';
+import 'bb_text_formatter.dart';
+import 'file_download_service.dart';
 
 class OtherMinistriesPage extends StatefulWidget {
   const OtherMinistriesPage({Key? key}) : super(key: key);
@@ -61,6 +63,29 @@ class _OtherMinistriesPageState extends State<OtherMinistriesPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Helper logic to isolate and extract the first name from the sender ID string safely
+  String _getSenderFirstName(dynamic senderId) {
+    if (senderId == null || senderId.toString().trim().isEmpty) {
+      return "Staff";
+    }
+
+    String cleanId = senderId.toString().trim();
+
+    // If it's an email string, split before the domain boundary
+    if (cleanId.contains('@')) {
+      cleanId = cleanId.split('@')[0];
+    }
+
+    // Split by spaces or underscores to grab the first structural name segment
+    List<String> parts = cleanId.split(RegExp(r'[\s_.]'));
+    if (parts.isNotEmpty && parts[0].isNotEmpty) {
+      // Capitalize the first letter for a clean appearance
+      return parts[0][0].toUpperCase() + parts[0].substring(1).toLowerCase();
+    }
+
+    return "Staff";
   }
 
   @override
@@ -138,19 +163,33 @@ class _OtherMinistriesPageState extends State<OtherMinistriesPage> {
   }
 
   Widget _buildPicsumItemCard(Map<String, dynamic> item) {
-    // Safely grab the staff user metadata identity string
-    final String postedBy = item['senderName'] ?? item['postedBy'] ?? 'Cathedral Admin';
+    final String uploaderName = _getSenderFirstName(item['senderName'] ?? item['fullName'] ?? 'Staff Member');
+
+    // 🔍 1. Identify if a valid server image url was fetched
+    String? fileUrl = item['fileUrl'];
+    String isFileType = item['isFileType'] ?? 'TEXT';
+    bool hasLiveImage = (isFileType == "IMAGE" && fileUrl != null && fileUrl.isNotEmpty);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
       height: 180,
       child: Stack(
         children: [
-          //  DYNAMIC PICSUM  BACKGROUND
+          // 🖼️ DYNAMIC LIVE IMAGE / FALLBACK CANVAS BACKGROUND
           Positioned.fill(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.network(
+              child: hasLiveImage
+                  ? Image.network(
+                'http://192.168.100.33:8080$fileUrl', // Your local Spring Boot server asset port
+                fit: BoxFit.cover,
+                errorBuilder: (c, e, s) => Container(
+                  color: Colors.blueGrey,
+                  child: const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 40),
+                ),
+              )
+                  : Image.network(
+                // Fallback to Picsum seed only if it's a legacy TEXT post type with no image upload
                 'https://picsum.photos/seed/${item['id']}/600/300',
                 fit: BoxFit.cover,
                 errorBuilder: (c, e, s) => Container(color: Colors.blueGrey),
@@ -158,91 +197,85 @@ class _OtherMinistriesPageState extends State<OtherMinistriesPage> {
             ),
           ),
 
+          // 🏁 CONTRAST GRADIENT OVERLAY LAYER
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.80),
-                    Colors.black.withValues(alpha: 0.40),
-                    Colors.black.withValues(alpha: 0.85), // Fading black from right side
+                    Colors.transparent,
+                    // If it's a live upload image, we slightly deepen the gradient value for ultimate text legibility
+                    Colors.black.withValues(alpha: hasLiveImage ? 0.9 : 0.85)
                   ],
-                  stops: const [0.0, 0.5, 1.0],
                 ),
               ),
             ),
           ),
 
-                    Padding(
+          // 📝 FOREGROUND CONTENT CONTAINER
+          Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.end, // Anchors  smoothly to the base
-                    children: [
-                      Text(
-                        item['title'].toString().toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.cyanAccent, // Cyan accent pops cleanly on dark vignettes
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item['content'] ?? '',
-                       // BBTextFormatter.parseToRichText(context, item['content'] ?? '') as String,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.2),
-                      ),
-                      const SizedBox(height: 8),
-
-                      Row(
-                        children: [
-                          const Icon(Icons.person_outline_rounded, size: 12, color: Colors.cyanAccent),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'By: $postedBy',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: Colors.cyanAccent, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-
-                      //TIMESTAMP
-    Row(
-                        children: [
-                          const Icon(Icons.calendar_today, size: 11, color: Colors.white60),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              '${item['formattedDate']} | 🕒 ${item['formattedTime']}',
-                              style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w500, fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                Text(
+                  item['title'].toString().toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.cyanAccent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
                   ),
                 ),
-                const SizedBox(width: 56),
+                const SizedBox(height: 4),
+                BBText(
+                  text: item['content'] ?? '',
+                  charLimit: 40,
+                  color: Colors.white70,
+                  fontSize: 13,
+                ),
+                const SizedBox(height: 8),
+
+                // POSTED BY:
+                Row(
+                  children: [
+                    const Icon(Icons.person_pin_circle_rounded, size: 14, color: Colors.cyanAccent),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Posted by: $uploaderName',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11, color: Colors.cyanAccent, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+
+                // timestamp
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 11, color: Colors.white60),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '${item['formattedDate']} | 🕒 ${item['formattedTime']}',
+                        style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w500, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
 
-          //ACK LOGO
+          // Action navigation symbol
           Positioned(
             bottom: 16,
             right: 16,
@@ -252,7 +285,6 @@ class _OtherMinistriesPageState extends State<OtherMinistriesPage> {
                   MaterialPageRoute(
                     builder: (context) => EventDetailsScreen(
                       eventData: item,
-                      eventItem: const {},
                     ),
                   ),
                 );
@@ -280,38 +312,5 @@ class _OtherMinistriesPageState extends State<OtherMinistriesPage> {
         ],
       ),
     );
-  }
-
-}
-class BBTextFormatter {
-  static Widget parseToRichText(BuildContext context, String input, {double fontSize = 13.0, double height = 1.3}) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color defaultColor = isDark ? Colors.white70 : Colors.black87;
-    final Color blueColor = isDark ? Colors.lightBlueAccent : const Color(0xFF0D47A1);
-    final Color redColor = isDark ? Colors.redAccent : const Color(0xFFC62828);
-    final Color greenColor = isDark ? Colors.greenAccent : const Color(0xFF2E7D32);
-
-    final List<TextSpan> spans = [];
-    RegExp regExp = RegExp(r'\[([brg])\](.*?)\[\/\1\]|([^\[]+)', dotAll: true);
-    // final RegExp regExp = RegExp(r'<(b)>(.*?)</\1>|([^<]+)', dotAll: true);
-    final Iterable<Match> matches = regExp.allMatches(input);
-
-    for (final Match match in matches) {
-      if (match.group(3) != null) {
-        spans.add(TextSpan(text: match.group(3), style: TextStyle(color: defaultColor, fontSize: fontSize, height: height)));
-      } else {
-        final String? tag = match.group(1);
-        final String textContent = match.group(2) ?? '';
-        Color targetColor = defaultColor;
-        FontWeight weight = FontWeight.normal;
-
-        if (tag == 'b') { targetColor = blueColor; weight = FontWeight.bold; }
-        else if (tag == 'r') { targetColor = redColor; weight = FontWeight.bold; }
-        else if (tag == 'g') { targetColor = greenColor; weight = FontWeight.bold; }
-
-        spans.add(TextSpan(text: textContent, style: TextStyle(color: targetColor, fontWeight: weight, fontSize: fontSize, height: height)));
-      }
-    }
-    return RichText(text: TextSpan(children: spans));
   }
 }

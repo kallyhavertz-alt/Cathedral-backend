@@ -5,10 +5,10 @@ import 'package:untitled/session_manager.dart';
 import 'package:untitled/local_database_helper.dart';
 
 class NoteWorkspaceScreen extends StatefulWidget {
-  final int? noteId;         // Null if writing a new note, holds PK ID if editing
-  final int eventId;         // The relational event link from database schema
-  final String eventTitle;   // The inherited category name (e.g., 'Palm Sunday')
-  final bool isEditing;      // Tracker flag determining mode strategy
+  final int? noteId;         
+  final int eventId;         
+  final String eventTitle;   
+  final bool isEditing;      
   final String? initialTitle;
   final String? initialContent;
 
@@ -35,6 +35,8 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
   bool _isItalicActive = false;
   bool _isUnderlineActive = false;
 
+  final String _baseUrl = 'https://cathedral-backend-server-files-production.up.railway.app/api/notes';
+
   @override
   void initState() {
     super.initState();
@@ -50,7 +52,7 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
     super.dispose();
   }
 
-  Future<void> _saveNoteToPostgres() async {
+  Future<void> _saveNote() async {
     if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Title can't be empty.")),
@@ -58,124 +60,116 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
       return;
     }
 
+    final int activeUserId = SessionManager.currentUserId;
+    final String contentEncoded = _contentController.getEncodedMarkdown();
+
     final Map<String, dynamic> notePayload = {
       "title": _titleController.text.trim(),
-      "content": _contentController.getEncodedMarkdown(),
-      "userId": SessionManager.currentUserId,
+      "content": contentEncoded,
+      "userId": activeUserId,
       "eventId": widget.eventId,
       "eventTitle": widget.eventTitle,
       "createdAt": DateTime.now().toIso8601String(),
     };
 
-    setState(() {
-      _isSaving = true;
-    });
+    setState(() => _isSaving = true);
 
     bool networkSyncSuccess = false;
+    dynamic serverResponseId;
 
     try {
-      if (widget.isEditing && widget.noteId != null) {
-        final String updateUrl = ' https://tag-player-unstuck.ngrok-free.dev/api/notes/update/${widget.noteId}';
-        final response = await http.put(
-          Uri.parse(updateUrl),
+      http.Response response;
+      // 🛡️ If the noteId is negative or null, it's a local-only note that needs a fresh POST to the server.
+      if (widget.isEditing && widget.noteId != null && widget.noteId! > 0) {
+        response = await http.put(
+          Uri.parse('$_baseUrl/update/${widget.noteId}'),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode(notePayload),
-        ).timeout(const Duration(seconds: 4));
-
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          networkSyncSuccess = true;
-        }
+        ).timeout(const Duration(seconds: 5));
       } else {
-        final int activeId = SessionManager.currentUserId;
-        final String dynamicAddUrl = 'http://192.168.100.33:8080/api/notes/add/$activeId';
-
-        final response = await http.post(
-          Uri.parse(dynamicAddUrl),
+        response = await http.post(
+          Uri.parse('$_baseUrl/add/$activeUserId'),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode(notePayload),
-        ).timeout(const Duration(seconds: 4));
+        ).timeout(const Duration(seconds: 5));
+      }
 
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          networkSyncSuccess = true;
-        }
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        networkSyncSuccess = true;
+        final data = jsonDecode(response.body);
+        serverResponseId = data['id'];
       }
     } catch (e) {
-      print('📡 Network route offline or timed out. Diverting to local engine.');
+      debugPrint('📡 Note Sync failed: $e');
     }
 
     try {
       final db = await LocalDatabaseHelper.instance.database;
 
-      if (widget.isEditing) {
-        final dynamic targetedId = widget.noteId;
+      if (widget.isEditing && widget.noteId != null) {
+        final Map<String, dynamic> updateData = {
+          'title': notePayload['title'],
+          'content': notePayload['content'],
+          'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
+        };
 
-        if (targetedId != null) {
-          int rowsAffected = await db.update(
-            'local_notes',
-            {
-              'title': notePayload['title'],
-              'content': notePayload['content'],
-              'eventId': notePayload['eventId'],
-              'eventTitle': notePayload['eventTitle'],
-              'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
-            },
-            where: 'id = ?',
-            whereArgs: [targetedId],
-          );
-
-          if (rowsAffected == 0) {
-            await db.insert(
-              'local_notes',
-              {
-                'id': targetedId,
-                'userId': notePayload['userId'],
-                'eventId': notePayload['eventId'],
-                'eventTitle': notePayload['eventTitle'],
-                'title': notePayload['title'],
-                'content': notePayload['content'],
-                'createdAt': notePayload['createdAt'],
-                'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
-                'isFavorite': 0,
-              },
-            );
-          }
+        // 🔄 If we just successfully POSTed a local-only note, update its ID to match the server
+        if (networkSyncSuccess && widget.noteId! < 0 && serverResponseId != null) {
+          updateData['id'] = int.parse(serverResponseId.toString());
         }
+
+        await db.update(
+          'local_notes',
+          updateData,
+          where: 'id = ?',
+          whereArgs: [widget.noteId],
+        );
       } else {
-        if (!networkSyncSuccess) {
-          await LocalDatabaseHelper.instance.insertOfflineNote({
-            ...notePayload,
-            'syncStatus': 'PENDING',
-          });
-        }
+        // New Note: If server returned an ID, use it, else generate local negative ID
+        final int localId = networkSyncSuccess && serverResponseId != null
+            ? int.parse(serverResponseId.toString()) 
+            : DateTime.now().millisecondsSinceEpoch * -1;
+
+        await db.insert(
+          'local_notes',
+          {
+            'id': localId,
+            'userId': activeUserId,
+            'eventId': widget.eventId,
+            'eventTitle': widget.eventTitle,
+            'title': notePayload['title'],
+            'content': notePayload['content'],
+            'createdAt': notePayload['createdAt'],
+            'syncStatus': networkSyncSuccess ? 'SYNCED' : 'PENDING',
+            'isFavorite': 0,
+          },
+        );
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        /*ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(networkSyncSuccess
-                ? 'Note synchronized to Cathedral records!'
-                : 'Saved locally to device storage!'),
+                ? '✅ Note synchronized successfully!'
+                : ''),
             backgroundColor: networkSyncSuccess ? Colors.green : Colors.orange,
             behavior: SnackBarBehavior.floating,
           ),
         );
+
+         */
         Navigator.pop(context, true);
       }
     } catch (dbError) {
-      print('🚨 Critical SQLite Failure: $dbError');
+      debugPrint('🚨 SQLite Failure: $dbError');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
-
     final Color mainTextColor = isDark ? Colors.white : Colors.black87;
     final Color headingLabelColor = isDark ? Colors.white60 : Colors.grey;
     final Color dividerLineColor = isDark ? Colors.white24 : Colors.black12;
@@ -195,24 +189,15 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
           style: TextStyle(color: mainTextColor, fontWeight: FontWeight.bold),
         ),
         actions: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Text(
-                '${_titleController.text.length}/${_titleController.text.length + _contentController.text.length}',
-                style: TextStyle(color: headingLabelColor, fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
           _isSaving
-              ? Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: iconActionButtonColor))),
-          )
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                )
               : IconButton(
-            icon: Icon(Icons.save, color: iconActionButtonColor, size: 28),
-            onPressed: _saveNoteToPostgres,
-          ),
+                  icon: Icon(Icons.check_circle_outline_rounded, color: iconActionButtonColor, size: 28),
+                  onPressed: _saveNote,
+                ),
           const SizedBox(width: 8),
         ],
       ),
@@ -223,27 +208,17 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Title',
-                  style: TextStyle(fontSize: 16, color: headingLabelColor, fontWeight: FontWeight.w500),
-                ),
                 TextField(
                   controller: _titleController,
                   maxLines: 1,
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: mainTextColor),
                   decoration: InputDecoration(
-                    hintText: 'e.g. Palm Sunday',
+                    hintText: 'Note Title',
                     hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
                     border: InputBorder.none,
                   ),
-                  onChanged: (val) => setState(() {}),
                 ),
                 Divider(height: 20, thickness: 1, color: dividerLineColor),
-                const SizedBox(height: 10),
-                Text(
-                  'Content',
-                  style: TextStyle(fontSize: 16, color: headingLabelColor, fontWeight: FontWeight.w500),
-                ),
                 Expanded(
                   child: TextField(
                     controller: _contentController,
@@ -251,11 +226,10 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
                     keyboardType: TextInputType.multiline,
                     style: TextStyle(fontSize: 16, height: 1.5, color: mainTextColor),
                     decoration: InputDecoration(
-                      hintText: 'Start writing your sermon notes here...',
+                      hintText: 'Start writing...',
                       hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
                       border: InputBorder.none,
                     ),
-                    onChanged: (val) => setState(() {}),
                   ),
                 ),
               ],
@@ -298,7 +272,6 @@ class _NoteWorkspaceScreenState extends State<NoteWorkspaceScreen> {
             _isUnderlineActive = !_isUnderlineActive;
             _contentController.toggleStyle('U', _isUnderlineActive);
           }
-
           final currentSelection = _contentController.selection;
           _contentController.text = _contentController.text;
           _contentController.selection = currentSelection;
@@ -352,7 +325,6 @@ class StyleTextEditingController extends TextEditingController {
     }
   }
 
-  /// 💾 THE DELTA ENCODER: Upgraded to safely loop characters without breaking emojis
   String getEncodedMarkdown() {
     if (text.isEmpty) return '';
     StringBuffer buffer = StringBuffer();
@@ -380,7 +352,6 @@ class StyleTextEditingController extends TextEditingController {
     return buffer.toString();
   }
 
-  /// 🏛️ THE DELTA DECODER: Upgraded text extraction handling safely
   void setDecodedMarkdown(String rawData) {
     if (rawData.isEmpty) {
       text = '';
@@ -410,24 +381,20 @@ class StyleTextEditingController extends TextEditingController {
 
       if (index < charactersList.length) {
         cleanText.write(charactersList[index]);
-
         parsedRuns.add(TextAttributeChange(
           start: cursorCounter,
           isBold: workingBold,
           isItalic: workingItalic,
           isUnderline: workingUnderline,
         ));
-
         cursorCounter++;
         index++;
       }
     }
-
     text = cleanText.toString();
     styleRuns = parsedRuns;
   }
 
-  /// 🎨 TEXTSPAN BUILDER: Renders emojis completely unbroken inside your rich text field
   @override
   TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
     final TextStyle defaultStyle = style ?? const TextStyle();
@@ -456,7 +423,6 @@ class StyleTextEditingController extends TextEditingController {
 
       children.add(TextSpan(text: charactersList[i], style: dynamicStyle));
     }
-
     return TextSpan(style: defaultStyle, children: children);
   }
 }
